@@ -18,6 +18,7 @@ class Domain(object):
         self.items = list(queue._queue)
         self.numbers = np.linspace(0, queue.capacity, queue.capacity + 1)
         self.grid = csr_matrix((1, queue.capacity + 1))
+        self.result = 0
 
     def __len__(self):
         return self.grid.shape[0] - 1
@@ -60,7 +61,9 @@ class Domain(object):
     def backward(self):
         """ Find answer using filled domain """
         prev = self.get_row(-1)
+
         ix = np.argmax(prev)
+        self.result = np.max(prev)
 
         answer = dict()
         for i in range(self.n_items-1, -1, -1):
@@ -80,14 +83,48 @@ class Domain(object):
         return self.backward()
 
 
-def main(path):
+def select_file(folder, rows=8):
+    """ Select menu for input directory """
+    import os
+
+    files = [file for file in os.listdir(folder) if "ks" in file]
+    page  = 0
+    while True:
+        for i, name in zip(range(rows), files[page * rows:(page + 1) * rows]):
+            print(i, name)
+        try:
+            choice = int(input(
+                "Select file. (8 for prev page, 9 for next page)\n"))
+        except ValueError as e:
+            continue
+        if choice == 9 and len(files):
+            page += 1
+        elif choice == 8 and page > 0:
+            page -= 1
+        elif choice in list(range(rows)):
+            try:
+                return files[page * 8 + choice]
+            except IndexError as e:
+                continue
+
+def main():
+    import os.path as op
+    import time
+
+    data_folder = op.join("..", "data")
+    filename = select_file(data_folder)
+    path = op.join(data_folder, filename)
+
     q = Queue.read_queue(path)
     q.sort("density", descending=True)
     logging.info(q)
 
     d = Domain(q)
-    logging.info("Selected items: {}".format(d.solve()))
+    t0 = time.time()
+    answer = d.solve()
+    logging.info("Finished in (sec): {}".format(time.time() - t0))
+    logging.info("Resulting value: {}".format(d.result))
+    logging.info("Selected items: {}".format(answer))
 
 if __name__=="__main__":
-    path = "../data/ks_4_0"
-    main(path)
+    main()
