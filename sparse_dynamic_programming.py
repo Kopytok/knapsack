@@ -150,11 +150,7 @@ def main():
     data_folder = "data"
     filename = select_file(data_folder)
     path = op.join(data_folder, filename)
-
-    # q = Queue.read_queue(path)
-    # q.sort("density", descending=True)
-    # logging.info(q)
-
+    
     d = Domain().load(path)
     t0 = time.time()
     answer = d.solve()
