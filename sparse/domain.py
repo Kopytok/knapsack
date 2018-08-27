@@ -1,23 +1,36 @@
 import logging
 from copy import deepcopy
+from collections import namedtuple
 
 import numpy as np
-from scipy.sparse import vstack, csr_matrix
+import pandas as pd
 
-from knapsack_queue import Queue
+from scipy.sparse import vstack, csr_matrix
 
 logging.basicConfig(level=logging.INFO,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S")
 
+def line_to_numbers(line):
+    """ Split line into 2 digits and convert them to int """
+    return tuple(int(num) for num in line.split())
+
+def read_item(line):
+    """ Read one knapsack item """
+    value, weight = line_to_numbers(line)
+    return Item(value, weight, value / weight)
+
+Item = namedtuple("Item", ["value", "weight", "density"])
+
 
 class Domain(object):
-    def __init__(self, queue):
-        self.n_items = queue.n_items
-        self.capacity = queue.capacity
-        self.items = list(queue._queue)
-        self.numbers = np.linspace(0, queue.capacity, queue.capacity + 1)
-        self.grid = csr_matrix((1, queue.capacity + 1))
+    def __init__(self, n_items=0, capacity=0, items=None):
+        self.n_items = n_items
+        self.capacity = capacity
+        self.items = pd.DataFrame(items)
+
+        self.numbers = np.linspace(0, capacity, capacity + 1)
+        self.grid = csr_matrix((1, capacity + 1))
         self.result = 0
 
     def __len__(self):
@@ -43,9 +56,15 @@ class Domain(object):
         state = self.get_row(-1)
 
         # Evaluate
-        item_value = np.where(self.numbers > item.weight, item.value, 0)
+        try:
+            item_value = np.where(self.numbers > item.weight, item.value, 0)
+        except AttributeError as e:
+
+            logging.info("Item: {}".format(item))
+            raise e
         if item.weight < self.capacity:
-            shifted_state = np.hstack([[0] * item.weight, (state + item.value)[:-item.weight]])
+            weight = int(item.weight)
+            shifted_state = np.hstack([[0] * weight, (state + item.value)[:-weight]])
             new_state = np.max([state, shifted_state], axis=0)
         else:
             new_state = state
@@ -55,25 +74,24 @@ class Domain(object):
 
     def forward(self):
         """ Fill domain """
-        for item in self.items:
+        for n, item in self.items.iterrows():
             self.add_item(item)
 
     def backward(self):
         """ Find answer using filled domain """
         prev = self.get_row(-1)
-
         ix = np.argmax(prev)
         self.result = np.max(prev)
 
         answer = dict()
         for i in range(self.n_items-1, -1, -1):
             cur = self.get_row(i)
-            item = self.items[i]
+            item = self.items.iloc[i]
             if cur[ix] == prev[ix]:
-                answer[item.id] = 0
+                answer[item.name] = 0
             else:
-                answer[item.id] = 1
-                ix -= item.weight
+                answer[item.name] = 1
+                ix -= int(item.weight)
             prev = cur
         return [value for (key, value) in sorted(answer.items())]
 
@@ -81,6 +99,20 @@ class Domain(object):
         self.forward()
         logging.info("Finished filling domain")
         return self.backward()
+
+    @classmethod
+    def load(cls, path):
+        with open(path, "r") as f:
+            items = f.readlines()
+
+        n_items, capacity = line_to_numbers(items[0])
+        logging.info("New data: {} items, {} capacity".format(n_items, capacity))
+        items_list = list()
+        for item in items[1:]:
+            row = read_item(item)
+            items_list.append(row)
+        d = cls(n_items, capacity, items_list)
+        return d
 
 
 def select_file(folder, rows=8):
@@ -115,11 +147,11 @@ def main():
     filename = select_file(data_folder)
     path = op.join(data_folder, filename)
 
-    q = Queue.read_queue(path)
-    q.sort("density", descending=True)
-    logging.info(q)
+    # q = Queue.read_queue(path)
+    # q.sort("density", descending=True)
+    # logging.info(q)
 
-    d = Domain(q)
+    d = Domain().load(path)
     t0 = time.time()
     answer = d.solve()
     logging.info("Finished in (sec): {}".format(time.time() - t0))
