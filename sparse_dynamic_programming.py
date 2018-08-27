@@ -22,12 +22,24 @@ def read_item(line):
 
 Item = namedtuple("Item", ["value", "weight", "density"])
 
+def prepare_items(items=None):
+    if items:
+        df = pd.DataFrame(items)
+        by = "density" if df["density"].std() > 0.2 else "value"
+        logging.info("Sorted by {}".format(by))
+        df.sort_values(by, ascending=False, inplace=True)
+        df["select"] = np.nan
+        logging.info("First 5 items:\n{}".format(df.head()))
+        return df
+    else:
+        return
+
 
 class Domain(object):
     def __init__(self, n_items=0, capacity=0, items=None):
         self.n_items = n_items
         self.capacity = capacity
-        self.items = pd.DataFrame(items)
+        self.items = prepare_items(items)
 
         self.numbers = np.linspace(0, capacity, capacity + 1)
         self.grid = csr_matrix((1, capacity + 1))
@@ -56,12 +68,8 @@ class Domain(object):
         state = self.get_row(-1)
 
         # Evaluate
-        try:
-            item_value = np.where(self.numbers > item.weight, item.value, 0)
-        except AttributeError as e:
+        item_value = np.where(self.numbers > item.weight, item.value, 0)
 
-            logging.info("Item: {}".format(item))
-            raise e
         if item.weight < self.capacity:
             weight = int(item.weight)
             shifted_state = np.hstack([[0] * weight, (state + item.value)[:-weight]])
@@ -83,17 +91,13 @@ class Domain(object):
         ix = np.argmax(prev)
         self.result = np.max(prev)
 
-        answer = dict()
         for i in range(self.n_items-1, -1, -1):
             cur = self.get_row(i)
-            item = self.items.iloc[i]
-            if cur[ix] == prev[ix]:
-                answer[item.name] = 0
-            else:
-                answer[item.name] = 1
-                ix -= int(item.weight)
+            changed = (cur[ix] != prev[ix])
+            self.items.loc[i, "select"] = changed
+            ix -= int(self.items.loc[i, "weight"]) if changed else 0
             prev = cur
-        return [value for (key, value) in sorted(answer.items())]
+        return self.items.sort_index()["select"].astype(int).tolist()
 
     def solve(self):
         self.forward()
