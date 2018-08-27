@@ -143,7 +143,7 @@ def main():
     import os.path as op
     import time
 
-    data_folder = op.join("..", "data")
+    data_folder = "data"
     filename = select_file(data_folder)
     path = op.join(data_folder, filename)
 
