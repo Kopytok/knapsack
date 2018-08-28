@@ -10,7 +10,7 @@ from scipy.sparse import vstack, lil_matrix
 
 from prune import prune
 
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -38,8 +38,6 @@ def prepare_items(items=None, by="value"):
             by = [by, else_by]
         df.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
-        df.reset_index(inplace=True) # df.index -> order, df["index"] -> id
-        df.rename(columns={"index": "id"}, inplace=True)
         df["take"] = np.nan
         logging.info("First 5 items:\n{}".format(df.head()))
         return df
@@ -54,8 +52,8 @@ class Domain(object):
         self.items = prepare_items(items)
 
         self.numbers = np.linspace(0, capacity, capacity + 1)
-        self.grid = lil_matrix((n_items + 1, capacity + 1))
-        self.cur_item_id = 0
+        self.grid = lil_matrix((n_items, capacity + 1))
+        self.search_order = [-1, ]
 
         self.result = 0
 
@@ -77,65 +75,72 @@ class Domain(object):
         new_state = np.where(mask, row, 0)
         self.grid[ix, :] = new_state
 
-    def add_item(self, n, item):
+    def add_item(self, cur_id, prev_id, item):
         """ Evaluate item and expand grid """
-        state = self.get_row(n)
+        logging.debug("prev_id: {}".format(prev_id))
+        state = self.get_row(prev_id) if prev_id > -1 \
+            else np.zeros(self.capacity + 1)
+        logging.debug("state:\n{}".format(state))
 
-        logging.debug("Add item:\n{}".format(item))
         weight = int(item["weight"])
-        if weight < self.capacity:
-            if_add = np.hstack(
-                [state[:weight], (state + item["value"])[:-weight]])
-            new_state = np.max([state, if_add], axis=0)
-            self.add_row(n + 1, new_state)
-
-            if (new_state[:-weight] != state[:-weight]).all():
-                logging.info("Filled 1 for item #{}".format(n))
-                self.items.loc[n, "take"] = 1
-            elif (new_state[weight:] == state[weight:]).all():
-                logging.info("Filled 0 for item #{} (No change)".format(n))
-                self.items.loc[n, "take"] = 0
-        else:
-            logging.info("Filled 0 for item #{} (Too big)".format(n))
-            self.items.loc[n, "take"] = 0
+        if_add = np.hstack(
+            [state[:weight], (state + item["value"])[:-weight]])
+        new_state = np.max([state, if_add], axis=0)
+        self.add_row(cur_id, new_state)
         logging.debug("domain:\n{}".format(self.grid.toarray()))
+
+        if (new_state[:-weight] != state[:-weight]).all():
+            logging.info("Filled 1 for item #{}".format(cur_id))
+            self.items.loc[cur_id, "take"] = 1
+        elif (new_state[weight:] == state[weight:]).all():
+            logging.info("Filled 0 for item #{} (No change)".format(cur_id))
+            self.items.loc[cur_id, "take"] = 0
 
     def forward(self):
         """ Fill domain """
-        for n, item in self.items.iterrows():
-            self.cur_item_id = n
+        for cur_id, item in self.items.iterrows():
+            logging.debug("Forward. n: {}\titem:\n{}".format(cur_id, item))
             if np.isnan(item["take"]):
-                self.add_item(n, item)
+                if int(item["weight"]) > self.capacity:
+                    self.items.loc[cur_id, "take"] = 0
+                    logging.info("Filled 0 for item #{} (Too big)"
+                        .format(cur_id))
+                else:
+                    self.add_item(cur_id, self.search_order[-1], item)
+                    self.search_order.append(cur_id)
                 prune(self)
 
     def backward(self):
         """ Find answer using filled domain """
-        last_row = self.get_row(-1)
-        ix = np.argmax(last_row) # First weight with max value
-        self.result = int(np.max(last_row))
-
-        for i, item in self.items.iloc[::-1, :].iterrows():
-            logging.debug("Backward. i: {}\titem:\n{}".format(i, item))
-            weight = int(item["weight"])
-            if np.isnan(item["take"]):
-                cur = self.get_row(i)
-                prev = self.get_row(i+1)
-                if cur[ix] == prev[ix] == 0:
-                    break
+        prev_id = last_item_id = self.search_order.pop()
+        prev = last = self.get_row(last_item_id)
+        self.result = int(np.max(last))
+        ix = np.argmax(last) # First weight with max value
+        logging.debug("Result ix: {}".format(ix))
+        while len(self.search_order) > 0:
+            cur_id = self.search_order.pop()
+            if cur_id > -1:
+                cur_item = self.items.loc[prev_id]
+                logging.debug("Backward. id: {}\titem:\n{}"
+                    .format(cur_id, cur_item))
+                weight = int(cur_item["weight"])
+                cur = self.get_row(cur_id)
                 logging.debug("cur[ix]: {}".format(cur[ix]))
                 logging.debug("prev[ix]: {}".format(prev[ix]))
-                self.items.loc[i, "take"] = (cur[ix] != prev[ix])
-
-            take = self.items.loc[i, "take"]
-            logging.debug("Take" if take else "Leave")
-            ix -= weight if take else 0
-            logging.debug("ix: {}".format(ix))
-            if ix == 0:
-                break
+                take = int(cur[ix] != prev[ix])
+                logging.debug("Take" if take else "Leave")
+                self.items.loc[prev_id, "take"] = take
+                ix -= weight if take else 0
+                logging.debug("ix: {}".format(ix))
+                prev_id, prev = cur_id, cur
+                if cur[ix] == 0 or ix == 0:
+                    break
+            else:
+                self.items.loc[prev_id, "take"] = int(ix > 0)
 
         self.items["take"].fillna(0, inplace=True)
         logging.debug("Final items:\n{}".format(self.items))
-        return self.items.sort_values("id")["take"].astype(int).tolist()
+        return self.items.sort_index()["take"].astype(int).tolist()
 
     def solve(self):
         t0 = time.time()
