@@ -105,19 +105,12 @@ class Knapsack(object):
         order = 0
         prev_id = -1
         for cur_id, item in search_items.iterrows():
-            logging.debug("Forward. n: {}\titem:\n{}"
-                .format(cur_id, item))
-            if int(item["weight"]) > self.capacity:
-                self.items.loc[cur_id, "take"] = 0
-                logging.info("Filled 0 for item #{} (Too big)".format(cur_id))
-            else:
-                self.add_item(order, item)
-
-                logging.debug("Forward. cur_id: {}\torder: {}"
-                    .format(cur_id, order))
-                self.items.loc[cur_id, "order"] = order
-                order += 1
-                prev_id = cur_id
+            logging.debug("Forward. cur_id: {}\torder: {}\titem:\n{}"
+                .format(cur_id, order, item))
+            self.add_item(order, item)
+            self.items.loc[cur_id, "order"] = order
+            order += 1
+            prev_id = cur_id
             prune(self)
 
     def backward(self):
