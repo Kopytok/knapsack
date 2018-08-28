@@ -18,13 +18,9 @@ logging.basicConfig(level=logging.INFO,
         logging.StreamHandler(),
     ])
 
-def line_to_numbers(line):
-    """ Split line into 2 digits and convert them to int """
-    return map(int, line.split())
-
 def read_item(line):
     """ Read one knapsack item """
-    value, weight = line_to_numbers(line)
+    value, weight = map(int, line.split())
     return Item(value, weight, value / weight)
 
 Item = namedtuple("Item", ["value", "weight", "density"])
@@ -171,7 +167,7 @@ class Knapsack(object):
         with open(path, "r") as f:
             items = f.readlines()
 
-        n_items, capacity = line_to_numbers(items[0])
+        n_items, capacity = map(int, items[0].split())
         logging.info("New data: {} items, {} capacity"
             .format(n_items, capacity))
         items_list = list()
