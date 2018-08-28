@@ -1,5 +1,6 @@
 import time
 import logging
+
 from copy import deepcopy
 from collections import namedtuple
 
@@ -10,7 +11,7 @@ from scipy.sparse import vstack, lil_matrix
 
 from prune import prune
 
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -29,7 +30,7 @@ def read_item(line):
 
 Item = namedtuple("Item", ["value", "weight", "density"])
 
-def prepare_items(items=None, by="value"):
+def prepare_items(items=None, by=None):
     if items:
         df = pd.DataFrame(items)
         if not by:
@@ -39,13 +40,13 @@ def prepare_items(items=None, by="value"):
         df.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
         df["take"] = np.nan
+        df.loc[df["value"] == 0, "take"] = 0
         logging.info("First 5 items:\n{}".format(df.head()))
         return df
-    else:
-        return
+    return None
 
 
-class Domain(object):
+class Knapsack(object):
     def __init__(self, n_items=0, capacity=0, items=None):
         self.n_items = n_items
         self.capacity = capacity
@@ -69,7 +70,7 @@ class Domain(object):
         row = self.grid.tocsr()[row_ix, :].toarray()
         return np.maximum.accumulate(row, axis=1)[0]
 
-    def add_row(self, ix, row):
+    def set_row(self, ix, row):
         """ Add new row to the grid bottom """
         mask = np.hstack([[False], row[1:] != row[:-1]])
         new_state = np.where(mask, row, 0)
@@ -77,20 +78,20 @@ class Domain(object):
 
     def add_item(self, cur_id, prev_id, item):
         """ Evaluate item and expand grid """
+        weight, value = int(item["weight"]), int(item["value"])
+
         logging.debug("prev_id: {}".format(prev_id))
         state = self.get_row(prev_id) if prev_id > -1 \
             else np.zeros(self.capacity + 1)
         logging.debug("state:\n{}".format(state))
 
-        weight = int(item["weight"])
-        if_add = np.hstack(
-            [state[:weight], (state + item["value"])[:-weight]])
+        if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
-        self.add_row(cur_id, new_state)
+        self.set_row(cur_id, new_state)
         logging.debug("domain:\n{}".format(self.grid.toarray()))
 
         if (new_state[:-weight] != state[:-weight]).all():
-            logging.info("Filled 1 for item #{}".format(cur_id))
+            logging.info("Filled 1 for item #{} (All changed)".format(cur_id))
             self.items.loc[cur_id, "take"] = 1
         elif (new_state[weight:] == state[weight:]).all():
             logging.info("Filled 0 for item #{} (No change)".format(cur_id))
@@ -114,7 +115,7 @@ class Domain(object):
         """ Find answer using filled domain """
         prev_id = last_item_id = self.search_order.pop()
         prev = last = self.get_row(last_item_id)
-        self.result = int(np.max(last))
+        # self.result = int(np.max(last))
         ix = np.argmax(last) # First weight with max value
         logging.debug("Result ix: {}".format(ix))
         while len(self.search_order) > 0:
@@ -139,6 +140,7 @@ class Domain(object):
                 self.items.loc[prev_id, "take"] = int(ix > 0)
 
         self.items["take"].fillna(0, inplace=True)
+        self.result = self.items.loc[self.items["take"] == 1, "value"].sum()
         logging.debug("Final items:\n{}".format(self.items))
         return self.items.sort_index()["take"].astype(int).tolist()
 
@@ -166,8 +168,8 @@ class Domain(object):
         for item in items[1:]:
             row = read_item(item)
             items_list.append(row)
-        d = cls(n_items, capacity, items_list)
-        return d
+        knapsack = cls(n_items, capacity, items_list)
+        return knapsack
 
 
 def select_file(folder, rows=8):
@@ -203,9 +205,9 @@ def main():
     path = op.join(data_folder, filename)
 
     # path = "data/ks_4_0"
-    d = Domain().load(path)
-    t0 = time.time()
-    answer = d.solve()
+    knapsack = Knapsack().load(path)
+    answer = knapsack.solve()
+    return answer
 
 if __name__=="__main__":
     main()
