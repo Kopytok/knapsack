@@ -39,7 +39,6 @@ def prepare_items(items=None, by=None):
         df.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
         df["take"] = np.nan
-        prune_zero_values(self)
         logging.info("First 5 items:\n{}".format(df.head()))
         return df
     return None
@@ -155,6 +154,7 @@ class Knapsack(object):
     def solve(self):
         """ Run dynamic programming solver """
         t0 = time.time()
+        prune_zero_values(self)
         logging.info("Filling domain")
         self.forward()
         logging.info("Finished forward")
