@@ -9,13 +9,13 @@ import pandas as pd
 
 from scipy.sparse import vstack, lil_matrix
 
-from prune import prune
+from prune import *
 
 logging.basicConfig(level=logging.INFO,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
-        logging.FileHandler("text_log.log"), # For debug
+        logging.FileHandler("log_knapsack.log"), # For debug
         logging.StreamHandler(),
     ])
 
@@ -40,7 +40,7 @@ def prepare_items(items=None, by=None):
         df.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
         df["take"] = np.nan
-        df.loc[df["value"] == 0, "take"] = 0
+        prune_zero_values(self)
         logging.info("First 5 items:\n{}".format(df.head()))
         return df
     return None
@@ -90,7 +90,7 @@ class Knapsack(object):
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
         self.set_row(cur_id, new_state)
-        logging.debug("domain:\n{}".format(self.grid.toarray()))
+        logging.debug("domain:\n{}".format(self.grid.todense()))
         if (new_state[weight:] == state[weight:]).all():
             logging.info("Filled 0 for item #{} (No change)".format(cur_id))
             self.items.loc[cur_id, "take"] = 0
@@ -98,22 +98,24 @@ class Knapsack(object):
     def forward(self):
         """ Fill domain """
         self.items["order"] = np.nan
+        prune_exceeded_capacity(self)
+
         search_items = self.items.loc[self.items["take"].isnull()]
 
         order = 0
         prev_id = -1
         for cur_id, item in search_items.iterrows():
-            logging.debug("Forward. n: {}\titem:\n{}".format(cur_id, item))
+            logging.debug("Forward. n: {}\titem:\n{}"
+                .format(cur_id, item))
             if int(item["weight"]) > self.capacity:
                 self.items.loc[cur_id, "take"] = 0
                 logging.info("Filled 0 for item #{} (Too big)".format(cur_id))
             else:
-                self.add_item(cur_id, item)
+                self.add_item(order, item)
 
-                logging.debug("Forward. cur_id: {}\tprev_id: {}\torder: {}"
-                    .format(cur_id, prev_id, order))
+                logging.debug("Forward. cur_id: {}\torder: {}"
+                    .format(cur_id, order))
                 self.items.loc[cur_id, "order"] = order
-                self.items.loc[cur_id, "prev_id"] = prev_id
                 order += 1
                 prev_id = cur_id
             prune(self)
@@ -131,29 +133,25 @@ class Knapsack(object):
 
         prev_id = -1
         for cur_id, item in search_items.iterrows():
+            logging.debug("Backward. cur_id: {}\titem:\n{}"
+                .format(cur_id, item))
             weight = int(item["weight"])
 
             if prev_id == -1:
-                cur = self.get_row(cur_id)
-
-            # prev_id = item["prev_id"]
-            prev = self.get_row(cur_id - 1)
-
-            logging.debug("Backward. cur_id: {}\titem:\n{}"
-                .format(cur_id, item))
-
+                cur = self.get_row(item["order"])
+            prev = self.get_row(item["order"] - 1)
             logging.debug("cur[ix]: {}".format(cur[ix]))
             logging.debug("prev[ix]: {}".format(prev[ix]))
 
             take = int(cur[ix] != prev[ix])
+            self.items.loc[cur_id, "take"] = take
             logging.debug("Take" if take else "Leave")
 
-            self.items.loc[cur_id, "take"] = take
             ix -= weight if take else 0
             logging.debug("ix: {}".format(ix))
-            cur = prev
-            if cur[ix] == 0 or ix == 0:
+            if ix == 0:
                 break
+            cur = prev
 
         # Since ix == 0, don't take rest items
         self.items["take"].fillna(0, inplace=True)
@@ -186,8 +184,9 @@ class Knapsack(object):
             .format(n_items, capacity))
         items_list = list()
         for item in items[1:]:
-            row = read_item(item)
-            items_list.append(row)
+            if item.strip():
+                row = read_item(item)
+                items_list.append(row)
         knapsack = cls(n_items, capacity, items_list)
         return knapsack
 
