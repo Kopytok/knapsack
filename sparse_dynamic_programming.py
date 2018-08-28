@@ -82,11 +82,11 @@ class Knapsack(object):
         new_state = np.where(mask, row, 0)
         self.grid[ix, :] = new_state
 
-    def add_item(self, cur_id, prev_id, item):
+    def add_item(self, cur_id, item):
         """ Evaluate item and expand grid """
         weight, value = int(item["weight"]), int(item["value"])
 
-        state = self.get_row(prev_id)
+        state = self.get_row(cur_id - 1)
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
         self.set_row(cur_id, new_state)
@@ -108,7 +108,8 @@ class Knapsack(object):
                 self.items.loc[cur_id, "take"] = 0
                 logging.info("Filled 0 for item #{} (Too big)".format(cur_id))
             else:
-                self.add_item(cur_id, prev_id, item)
+                self.add_item(cur_id, item)
+
                 logging.debug("Forward. cur_id: {}\tprev_id: {}\torder: {}"
                     .format(cur_id, prev_id, order))
                 self.items.loc[cur_id, "order"] = order
@@ -135,11 +136,11 @@ class Knapsack(object):
             if prev_id == -1:
                 cur = self.get_row(cur_id)
 
-            prev_id = item["prev_id"]
-            prev = self.get_row(prev_id)
+            # prev_id = item["prev_id"]
+            prev = self.get_row(cur_id - 1)
 
-            logging.debug("Backward. cur_id: {}\tprev_id: {}\titem:\n{}"
-                .format(cur_id, prev_id, item))
+            logging.debug("Backward. cur_id: {}\titem:\n{}"
+                .format(cur_id, item))
 
             logging.debug("cur[ix]: {}".format(cur[ix]))
             logging.debug("prev[ix]: {}".format(prev[ix]))
@@ -150,7 +151,7 @@ class Knapsack(object):
             self.items.loc[cur_id, "take"] = take
             ix -= weight if take else 0
             logging.debug("ix: {}".format(ix))
-            cur_id, cur = prev_id, prev
+            cur = prev
             if cur[ix] == 0 or ix == 0:
                 break
 
