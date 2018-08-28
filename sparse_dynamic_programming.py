@@ -70,8 +70,11 @@ class Knapsack(object):
 
     def get_row(self, row_ix):
         """ Convert row from sparse into np.array """
-        row = self.grid.tocsr()[row_ix, :].toarray()
-        return np.maximum.accumulate(row, axis=1)[0]
+        if row_ix > -1:
+            row = self.grid.tocsr()[row_ix, :].toarray()
+            return np.maximum.accumulate(row, axis=1)[0]
+        else:
+            return np.zeros(self.capacity + 1)
 
     def set_row(self, ix, row):
         """ Add new row to the grid bottom """
@@ -83,8 +86,7 @@ class Knapsack(object):
         """ Evaluate item and expand grid """
         weight, value = int(item["weight"]), int(item["value"])
 
-        state = self.get_row(prev_id) if prev_id > -1 \
-            else np.zeros(self.capacity + 1)
+        state = self.get_row(prev_id)
 
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
