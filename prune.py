@@ -1,0 +1,2 @@
+def prune(domain):
+    pass

@@ -6,9 +6,11 @@ from collections import namedtuple
 import numpy as np
 import pandas as pd
 
-from scipy.sparse import vstack, csr_matrix
+from scipy.sparse import vstack, lil_matrix
 
-logging.basicConfig(level=logging.DEBUG,
+from prune import prune
+
+logging.basicConfig(level=logging.INFO,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -27,14 +29,18 @@ def read_item(line):
 
 Item = namedtuple("Item", ["value", "weight", "density"])
 
-def prepare_items(items=None):
+def prepare_items(items=None, by="value"):
     if items:
         df = pd.DataFrame(items)
-        by = "density" if df["density"].std() > 0.2 else "value"
-        else_by = "density" if by != "density" else "value"
+        if not by:
+            by = "density" if df["density"].std() > 0.2 else "value"
+            else_by = "density" if by != "density" else "value"
+            by = [by, else_by]
+        df.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
-        df.sort_values([by, else_by], ascending=False, inplace=True)
-        df["select"] = np.nan
+        df.reset_index(inplace=True) # df.index -> order, df["index"] -> id
+        df.rename(columns={"index": "id"}, inplace=True)
+        df["take"] = np.nan
         logging.info("First 5 items:\n{}".format(df.head()))
         return df
     else:
@@ -48,7 +54,7 @@ class Domain(object):
         self.items = prepare_items(items)
 
         self.numbers = np.linspace(0, capacity, capacity + 1)
-        self.grid = csr_matrix((1, capacity + 1))
+        self.grid = lil_matrix((n_items + 1, capacity + 1))
         self.cur_item_id = 0
 
         self.result = 0
@@ -62,39 +68,45 @@ class Domain(object):
 
     def get_row(self, row_ix):
         """ Convert row from sparse into np.array """
-        row = self.grid[row_ix, :].toarray()
+        row = self.grid.tocsr()[row_ix, :].toarray()
         return np.maximum.accumulate(row, axis=1)[0]
 
-    def add_row(self, row):
+    def add_row(self, ix, row):
         """ Add new row to the grid bottom """
         mask = np.hstack([[False], row[1:] != row[:-1]])
         new_state = np.where(mask, row, 0)
-        self.grid = vstack([self.grid, new_state]).tocsr()
+        self.grid[ix, :] = new_state
 
     def add_item(self, n, item):
         """ Evaluate item and expand grid """
-        state = self.get_row(-1)
+        state = self.get_row(n)
 
-        weight = int(item.weight)
+        logging.debug("Add item:\n{}".format(item))
+        weight = int(item["weight"])
         if weight < self.capacity:
-            item_value = np.where(self.numbers > weight, item.value, 0)
             if_add = np.hstack(
-                [state[:weight], (state + item.value)[:-weight]])
+                [state[:weight], (state + item["value"])[:-weight]])
             new_state = np.max([state, if_add], axis=0)
-            self.add_row(new_state)
+            self.add_row(n + 1, new_state)
+
             if (new_state[:-weight] != state[:-weight]).all():
-                logging.info("Filled 1 for {}".format(n))
-                self.items.loc[n, "select"] = 1
+                logging.info("Filled 1 for item #{}".format(n))
+                self.items.loc[n, "take"] = 1
+            elif (new_state[weight:] == state[weight:]).all():
+                logging.info("Filled 0 for item #{} (No change)".format(n))
+                self.items.loc[n, "take"] = 0
         else:
-            logging.info("Filled 0 for {}".format(n))
-            self.items.loc[n, "select"] = 0
+            logging.info("Filled 0 for item #{} (Too big)".format(n))
+            self.items.loc[n, "take"] = 0
+        logging.debug("domain:\n{}".format(self.grid.toarray()))
 
     def forward(self):
         """ Fill domain """
         for n, item in self.items.iterrows():
             self.cur_item_id = n
-            if np.isnan(item["select"]):
+            if np.isnan(item["take"]):
                 self.add_item(n, item)
+                prune(self)
 
     def backward(self):
         """ Find answer using filled domain """
@@ -102,35 +114,37 @@ class Domain(object):
         ix = np.argmax(last_row) # First weight with max value
         self.result = int(np.max(last_row))
 
-        for n, (i, item) in enumerate(self.items.iloc[::-1, :].iterrows()):
-            weight = int(self.items.loc[i, "weight"])
-            if np.isnan(item["select"]):
-                cur = self.get_row(-n)
-                prev = self.get_row(-(n - 1))
+        for i, item in self.items.iloc[::-1, :].iterrows():
+            logging.debug("Backward. i: {}\titem:\n{}".format(i, item))
+            weight = int(item["weight"])
+            if np.isnan(item["take"]):
+                cur = self.get_row(i)
+                prev = self.get_row(i+1)
                 if cur[ix] == prev[ix] == 0:
                     break
                 logging.debug("cur[ix]: {}".format(cur[ix]))
                 logging.debug("prev[ix]: {}".format(prev[ix]))
-                self.items.loc[i, "select"] = (cur[ix] != prev[ix])
+                self.items.loc[i, "take"] = (cur[ix] != prev[ix])
 
-            select = self.items.loc[i, "select"]
-            if select:
-                logging.debug("Select item:\n{}".format(item))
-            ix -= weight if select else 0
+            take = self.items.loc[i, "take"]
+            logging.debug("Take" if take else "Leave")
+            ix -= weight if take else 0
             logging.debug("ix: {}".format(ix))
             if ix == 0:
                 break
 
-        self.items["select"].fillna(0, inplace=True)
-        return self.items.sort_index()["select"].astype(int).tolist()
+        self.items["take"].fillna(0, inplace=True)
+        logging.debug("Final items:\n{}".format(self.items))
+        return self.items.sort_values("id")["take"].astype(int).tolist()
 
     def solve(self):
         t0 = time.time()
         logging.info("Filling domain")
         self.forward()
-        logging.info("Finished filling domain")
+        logging.info("Finished forward")
         answer = self.backward()
-        logging.info("Finished in (sec): {}".format(time.time() - t0))
+        logging.info("Finished backward. Total time (sec): {}"
+            .format(time.time() - t0))
         logging.info("Resulting value: {}".format(self.result))
         logging.info("Selected items: {}".format(answer))
         return answer
@@ -141,7 +155,8 @@ class Domain(object):
             items = f.readlines()
 
         n_items, capacity = line_to_numbers(items[0])
-        logging.info("New data: {} items, {} capacity".format(n_items, capacity))
+        logging.info("New data: {} items, {} capacity"
+            .format(n_items, capacity))
         items_list = list()
         for item in items[1:]:
             row = read_item(item)
@@ -182,6 +197,7 @@ def main():
     filename = select_file(data_folder)
     path = op.join(data_folder, filename)
 
+    # path = "data/ks_4_0"
     d = Domain().load(path)
     t0 = time.time()
     answer = d.solve()
