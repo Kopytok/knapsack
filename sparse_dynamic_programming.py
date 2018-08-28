@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO,
 
 def line_to_numbers(line):
     """ Split line into 2 digits and convert them to int """
-    return tuple(map(int, line.split()))
+    return map(int, line.split())
 
 def read_item(line):
     """ Read one knapsack item """
