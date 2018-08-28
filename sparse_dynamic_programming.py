@@ -54,7 +54,6 @@ class Knapsack(object):
 
         self.numbers = np.linspace(0, capacity, capacity + 1)
         self.grid = lil_matrix((n_items, capacity + 1))
-        self.search_order = [-1, ]
 
         self.result = 0
 
@@ -64,6 +63,10 @@ class Knapsack(object):
     def __repr__(self):
         return "Knapsack. Capacity: {}, items: {}"\
             .format(self.capacity, self.n_items)
+
+    def eval_left(self, col="value"):
+        """ Return sum of col for untouched items """
+        return self.items.loc[self.items["take"].isnull(), col].sum()
 
     def get_row(self, row_ix):
         """ Convert row from sparse into np.array """
@@ -80,10 +83,8 @@ class Knapsack(object):
         """ Evaluate item and expand grid """
         weight, value = int(item["weight"]), int(item["value"])
 
-        logging.debug("prev_id: {}".format(prev_id))
         state = self.get_row(prev_id) if prev_id > -1 \
             else np.zeros(self.capacity + 1)
-        logging.debug("state:\n{}".format(state))
 
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
@@ -93,58 +94,89 @@ class Knapsack(object):
         if (new_state[:-weight] != state[:-weight]).all():
             logging.info("Filled 1 for item #{} (All changed)".format(cur_id))
             self.items.loc[cur_id, "take"] = 1
+            return True # prnued_flg
+
         elif (new_state[weight:] == state[weight:]).all():
             logging.info("Filled 0 for item #{} (No change)".format(cur_id))
             self.items.loc[cur_id, "take"] = 0
+        return False
 
     def forward(self):
         """ Fill domain """
-        for cur_id, item in self.items.iterrows():
+        self.items["order"] = np.nan
+        search_items = self.items.loc[self.items["take"].isnull()]
+
+        order = 0
+        prev_id = -1
+        for cur_id, item in search_items.iterrows():
             logging.debug("Forward. n: {}\titem:\n{}".format(cur_id, item))
-            if np.isnan(item["take"]):
-                if int(item["weight"]) > self.capacity:
-                    self.items.loc[cur_id, "take"] = 0
-                    logging.info("Filled 0 for item #{} (Too big)"
-                        .format(cur_id))
-                else:
-                    self.add_item(cur_id, self.search_order[-1], item)
-                    self.search_order.append(cur_id)
-                prune(self)
+            if int(item["weight"]) > self.capacity:
+                self.items.loc[cur_id, "take"] = 0
+                logging.info("Filled 0 for item #{} (Too big)"
+                    .format(cur_id))
+            else:
+                pruned = self.add_item(cur_id, prev_id, item)
+                if pruned:
+                    self.capacity -= \
+                        self.items.loc[self.items == 1, "weight"].sum()
+                    self.forward()
+                    break
+
+                logging.debug("Forward. cur_id: {}\tprev_id: {}\torder: {}"
+                    .format(cur_id, prev_id, order))
+
+                self.items.loc[cur_id, "order"] = order
+                self.items.loc[cur_id, "prev_id"] = prev_id
+                order += 1
+                prev_id = cur_id
+            prune(self)
 
     def backward(self):
         """ Find answer using filled domain """
-        prev_id = last_item_id = self.search_order.pop()
-        prev = last = self.get_row(last_item_id)
-        # self.result = int(np.max(last))
-        ix = np.argmax(last) # First weight with max value
-        logging.debug("Result ix: {}".format(ix))
-        while len(self.search_order) > 0:
-            cur_id = self.search_order.pop()
-            if cur_id > -1:
-                cur_item = self.items.loc[prev_id]
-                logging.debug("Backward. id: {}\titem:\n{}"
-                    .format(cur_id, cur_item))
-                weight = int(cur_item["weight"])
-                cur = self.get_row(cur_id)
-                logging.debug("cur[ix]: {}".format(cur[ix]))
-                logging.debug("prev[ix]: {}".format(prev[ix]))
-                take = int(cur[ix] != prev[ix])
-                logging.debug("Take" if take else "Leave")
-                self.items.loc[prev_id, "take"] = take
-                ix -= weight if take else 0
-                logging.debug("ix: {}".format(ix))
-                prev_id, prev = cur_id, cur
-                if cur[ix] == 0 or ix == 0:
-                    break
-            else:
-                self.items.loc[prev_id, "take"] = int(ix > 0)
+        search_items = self.items.loc[~self.items["order"].isnull()]\
+            .sort_values("order", ascending=False).copy()
+        logging.debug("Backward search items:\n{}".format(search_items))
 
+        last_item_id = search_items["order"].max()
+        last = self.get_row(last_item_id)
+        ix = np.argmax(last)
+        logging.debug("Result ix: {}".format(ix))
+
+        prev_id = -1
+        for cur_id, item in search_items.iterrows():
+            weight = int(item["weight"])
+
+            if prev_id == -1:
+                cur = self.get_row(cur_id)
+
+            prev_id = item["prev_id"]
+            prev = self.get_row(prev_id)
+
+            logging.debug("Backward. cur_id: {}\tprev_id: {}\titem:\n{}"
+                .format(cur_id, prev_id, item))
+
+            logging.debug("cur[ix]: {}".format(cur[ix]))
+            logging.debug("prev[ix]: {}".format(prev[ix]))
+
+            take = int(cur[ix] != prev[ix])
+            logging.debug("Take" if take else "Leave")
+
+            self.items.loc[cur_id, "take"] = take
+            ix -= weight if take else 0
+            logging.debug("ix: {}".format(ix))
+            cur_id, cur = prev_id, prev
+            if cur[ix] == 0 or ix == 0:
+                break
+
+        # Since ix == 0, Fill left with 0
         self.items["take"].fillna(0, inplace=True)
+        # Calculate resulting value
         self.result = self.items.loc[self.items["take"] == 1, "value"].sum()
         logging.debug("Final items:\n{}".format(self.items))
         return self.items.sort_index()["take"].astype(int).tolist()
 
     def solve(self):
+        """ Run dynamic programming solver """
         t0 = time.time()
         logging.info("Filling domain")
         self.forward()
@@ -158,6 +190,7 @@ class Knapsack(object):
 
     @classmethod
     def load(cls, path):
+        """ Load knapsack from file """
         with open(path, "r") as f:
             items = f.readlines()
 
@@ -205,6 +238,7 @@ def main():
     path = op.join(data_folder, filename)
 
     # path = "data/ks_4_0"
+
     knapsack = Knapsack().load(path)
     answer = knapsack.solve()
     return answer
