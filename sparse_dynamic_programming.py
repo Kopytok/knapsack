@@ -87,21 +87,13 @@ class Knapsack(object):
         weight, value = int(item["weight"]), int(item["value"])
 
         state = self.get_row(prev_id)
-
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
         self.set_row(cur_id, new_state)
         logging.debug("domain:\n{}".format(self.grid.toarray()))
-
-        if (new_state[:-weight] != state[:-weight]).all():
-            logging.info("Filled 1 for item #{} (All changed)".format(cur_id))
-            self.items.loc[cur_id, "take"] = 1
-            return True # prnued_flg
-
-        elif (new_state[weight:] == state[weight:]).all():
+        if (new_state[weight:] == state[weight:]).all():
             logging.info("Filled 0 for item #{} (No change)".format(cur_id))
             self.items.loc[cur_id, "take"] = 0
-        return False
 
     def forward(self):
         """ Fill domain """
@@ -114,19 +106,11 @@ class Knapsack(object):
             logging.debug("Forward. n: {}\titem:\n{}".format(cur_id, item))
             if int(item["weight"]) > self.capacity:
                 self.items.loc[cur_id, "take"] = 0
-                logging.info("Filled 0 for item #{} (Too big)"
-                    .format(cur_id))
+                logging.info("Filled 0 for item #{} (Too big)".format(cur_id))
             else:
-                pruned = self.add_item(cur_id, prev_id, item)
-                if pruned:
-                    self.capacity -= \
-                        self.items.loc[self.items == 1, "weight"].sum()
-                    self.forward()
-                    break
-
+                self.add_item(cur_id, prev_id, item)
                 logging.debug("Forward. cur_id: {}\tprev_id: {}\torder: {}"
                     .format(cur_id, prev_id, order))
-
                 self.items.loc[cur_id, "order"] = order
                 self.items.loc[cur_id, "prev_id"] = prev_id
                 order += 1
@@ -170,7 +154,7 @@ class Knapsack(object):
             if cur[ix] == 0 or ix == 0:
                 break
 
-        # Since ix == 0, Fill left with 0
+        # Since ix == 0, don't take rest items
         self.items["take"].fillna(0, inplace=True)
         # Calculate resulting value
         self.result = self.items.loc[self.items["take"] == 1, "value"].sum()
