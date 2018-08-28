@@ -58,17 +58,19 @@ class Knapsack(object):
         return "Knapsack. Capacity: {}, items: {}"\
             .format(self.capacity, self.n_items)
 
-    def eval_left(self, col="value"):
+    def eval_left(self, col="value", order=None):
         """ Return sum of col for untouched items """
-        return self.items.loc[self.items["take"].isnull(), col].sum()
+        order = order or self.capacity
+        ix = ((self.items["take"].isnull() & self.items["order"].isnull()) |
+              (self.items["order"] > order))
+        return self.items.loc[ix, col].sum()
 
     def get_row(self, row_ix):
         """ Convert row from sparse into np.array """
         if row_ix > -1:
             row = self.grid.tocsr()[row_ix, :].toarray()
             return np.maximum.accumulate(row, axis=1)[0]
-        else:
-            return np.zeros(self.capacity + 1)
+        return np.zeros(self.capacity + 1)
 
     def set_row(self, ix, row):
         """ Add new row to the grid bottom """
@@ -93,7 +95,6 @@ class Knapsack(object):
         """ Fill domain """
         self.items["order"] = np.nan
         prune_exceeded_capacity(self)
-
         search_items = self.items.loc[self.items["take"].isnull()]
 
         order = 0
@@ -103,9 +104,14 @@ class Knapsack(object):
                 .format(cur_id, order, item))
             self.add_item(order, item)
             self.items.loc[cur_id, "order"] = order
+            logging.debug("eval_left value: {}"
+                .format(self.eval_left("value")))
+            logging.debug("eval_left weight: {}"
+                .format(self.eval_left("weight")))
             order += 1
             prev_id = cur_id
             prune(self)
+            self.feasibility_check()
 
     def backward(self):
         """ Find answer using filled domain """
@@ -147,6 +153,12 @@ class Knapsack(object):
         logging.debug("Final items:\n{}".format(self.items))
         return self.items.sort_index()["take"].astype(int).tolist()
 
+    def feasibility_check(self):
+        """ Check if total weight of taken items is
+            less than knapsack capacity """
+        assert self.items.loc[self.items["take"] == 1, "weight"].sum() \
+            <= self.capacity, "Not feasible answer. Exceeded capacity."
+
     def solve(self):
         """ Run dynamic programming solver """
         t0 = time.time()
@@ -157,6 +169,8 @@ class Knapsack(object):
         answer = self.backward()
         logging.info("Finished backward. Total time (sec): {}"
             .format(time.time() - t0))
+
+        self.feasibility_check()
         logging.info("Resulting value: {}".format(self.result))
         logging.info("Selected items: {}".format(answer))
         return answer
