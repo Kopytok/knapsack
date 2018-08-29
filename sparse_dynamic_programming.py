@@ -26,6 +26,7 @@ def read_item(line):
 Item = namedtuple("Item", ["value", "weight", "density"])
 
 def prepare_items(items=None, by=None):
+    """ Convert list of namedtuples into dataframe and sort it """
     if items:
         df = pd.DataFrame(items)
         if not by:
@@ -34,19 +35,10 @@ def prepare_items(items=None, by=None):
             by = [by, else_by]
         df.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
-        aux_columns = [
-            "take",
-            "avail_weight",
-            "avail_value",
-            "upper_weight",
-            "lower_weight",
-        ]
-        for col in aux_columns:
-            df[col] = np.nan
+        df["take"] = np.nan
         logging.info("First 5 items:\n{}".format(df.head()))
         return df
-    item_columns = ["value", "weight", "density", "take"]
-    return pd.DataFrame(columns=item_columns + aux_columns)
+    return pd.DataFrame(columns=["value", "weight", "density", "take"])
 
 class Knapsack(object):
     def __init__(self, n_items=0, capacity=0, items=None):
@@ -80,6 +72,18 @@ class Knapsack(object):
               (self.items["order"] > order))
         return self.items.loc[ix, param].sum()
 
+    def prepare_items_for_dp(self):
+        aux_columns = [
+            "order",
+            "avail_weight",
+            "avail_value",
+            "upper_weight",
+            "lower_weight",
+        ]
+        for col in aux_columns:
+            self.items[col] = np.nan
+        self.items["prune"] = 0
+
     def calculate_taken(self, value="value"):
         """ Calculate total of taken items values (value or weight) """
         return self.items.loc[self.items["take"] == 1, value].sum()
@@ -112,16 +116,20 @@ class Knapsack(object):
         new_state = np.max([state, if_add], axis=0)
         self.set_row(cur_id, new_state)
         self.calculate_boundaries(cur_id)
+        logging.debug("items:\n{}".format(self.items))
         logging.debug("domain:\n{}".format(self.grid.todense()))
         if (new_state[weight:] == state[weight:]).all():
             logging.info("Filled 0 for item #{} (No change)".format(cur_id))
             self.items.loc[cur_id, "take"] = 0
 
+    def prune(self):
+        """ Use prune as method """
+        return prune(self)
+
     def forward(self):
         """ Fill domain """
-        self.items["order"] = np.nan
-        self.items["prune"] = 0
-        prune(self)
+        self.prepare_items_for_dp()
+        self.prune()
         search_items = self.items.loc[self.items["take"].isnull()]
 
         order = 0
@@ -136,7 +144,7 @@ class Knapsack(object):
                     .format(param, self.eval_left(param)))
             order += 1
             prev_id = cur_id
-            prune(self)
+            self.prune()
             self.feasibility_check()
         self.items.drop("prune", axis=1, inplace=True)
 
