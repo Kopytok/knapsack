@@ -55,6 +55,12 @@ class Knapsack(object):
         return "Knapsack. Capacity: {}, items: {}"\
             .format(self.capacity, self.n_items)
 
+    def feasibility_check(self):
+        """ Check if total weight of taken items is
+            less than knapsack capacity """
+        assert self.items.loc[self.items["take"] == 1, "weight"].sum() \
+            <= self.capacity, "Not feasible answer. Exceeded capacity."
+
     def answer(self):
         """ Return answer as sequence of zeros and ones """
         return self.items.sort_index()["take"].astype(int).tolist()
@@ -157,12 +163,6 @@ class Knapsack(object):
         logging.debug("Final items:\n{}".format(self.items))
         return self.answer()
 
-    def feasibility_check(self):
-        """ Check if total weight of taken items is
-            less than knapsack capacity """
-        assert self.items.loc[self.items["take"] == 1, "weight"].sum() \
-            <= self.capacity, "Not feasible answer. Exceeded capacity."
-
     def solve(self):
         """ Run dynamic programming solver """
         t0 = time.time()
@@ -196,7 +196,7 @@ class Knapsack(object):
         return knapsack
 
 
-def select_file(folder, rows=8):
+def select_file_in(folder, rows=8):
     """ Select menu for input directory """
     import os
 
@@ -224,10 +224,7 @@ def main():
     import os.path as op
     import time
 
-    data_folder = "data"
-    filename = select_file(data_folder)
-    path = op.join(data_folder, filename)
-
+    path = op.join("data", select_file_in("data"))
     # path = "data/ks_4_0"
 
     knapsack = Knapsack().load(path)
