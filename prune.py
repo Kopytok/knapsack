@@ -1,6 +1,8 @@
 import logging
 
-from scipy.sparse import lil_matrix
+import numpy as np
+
+from scipy.sparse import lil_matrix, vstack
 
 def prune(knapsack):
     """ Main pruning function. Prune oboth items and domain """
@@ -74,6 +76,15 @@ def prune_clean_backward(knapsack, order):
     knapsack.grid = lil_matrix(knapsack.grid[:order,:])
     logging.debug("Number of items in domain after prune_clean_backward: {}"
         .format(knapsack.grid.count_nonzero()))
+
+def prune_clean_one(knapsack, order):
+    """ Remove row with index order from domain """
+    knapsack.grid = vstack([
+        knapsack.grid[:order, :],
+        knapsack.grid[order+1:, :]
+    ]).tolil()
+    knapsack.items.loc[knapsack.items["order"] == order, "order"] = np.nan
+    logging.debug("Removed row {} from domain".format(order))
 
 def prune_remove_not_taken(knapsack):
     """ Remove from domain rows for items with "take" == 0 """

@@ -136,14 +136,18 @@ class Knapsack(object):
         new_state = np.max([state, if_add], axis=0)
 
         self.set_row(order, new_state, threshold)
-        # logging.debug("items:\n{}".format(self.items.T))
-        # logging.debug("domain:\n{}".format(self.grid.todense()))
+        logging.debug("items:\n{}".format(self.items.T))
+        logging.debug("domain:\n{}".format(self.grid.todense()))
         if (new_state != state).all():
             self.items.loc[item.name, "take"] = 1
             logging.info("Filled 1 for item #{} (All changed)".format(order))
+            return True
         elif (new_state == state).all():
             logging.info("Filled 0 for item #{} (No change)".format(order))
             self.items.loc[order, "take"] = 0
+            prune_clean_one(self, order)
+            return False
+        return True
 
     def prune(self):
         """ Use prune as method """
@@ -156,17 +160,16 @@ class Knapsack(object):
         search_items = self.items.loc[self.items["take"].isnull()]
 
         order = 0
-        prev_id = -1
         for cur_id, item in search_items.iterrows():
+            if ~np.isnan(self.items.loc[cur_id, "take"]):
+                continue
             self.items.loc[cur_id, "order"] = order
             self.calculate_boundaries(cur_id)
             logging.debug("Forward. cur_id: {}\torder: {}\titem:\n{}"
                 .format(cur_id, order, self.items.loc[item.name]))
-            self.add_item(order, item)
+            order += int(self.add_item(order, item))
             logging.debug("Number of items in domain: {}"
                 .format(self.grid.count_nonzero()))
-            order += 1
-            prev_id = cur_id
             self.prune()
             self.feasibility_check()
         self.items.drop("prune", axis=1, inplace=True)
@@ -254,7 +257,7 @@ def main():
     import time
 
     path = op.join("data", select_file_in("data"))
-    # path = "data/ks_4_0"
+    # path = "data/ks_19_0"
 
     knapsack = Knapsack().load(path)
     answer = knapsack.solve()
