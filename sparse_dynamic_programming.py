@@ -6,11 +6,11 @@ from collections import namedtuple
 import numpy as np
 import pandas as pd
 
-from scipy.sparse import vstack, lil_matrix
+from scipy.sparse import lil_matrix
 
 from prune import *
 
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -65,12 +65,12 @@ class Knapsack(object):
         """ Return answer as sequence of zeros and ones """
         return self.items.sort_index()["take"].astype(int).tolist()
 
-    def eval_left(self, col="value", order=None):
-        """ Return sum of col for untouched items """
+    def eval_left(self, param="value", order=None):
+        """ Return sum of param for untouched items """
         order = order or self.capacity
         ix = ((self.items["take"].isnull() & self.items["order"].isnull()) |
               (self.items["order"] > order))
-        return self.items.loc[ix, col].sum()
+        return self.items.loc[ix, param].sum()
 
     def calculate_taken(self, value="value"):
         """ Calculate total of taken items values (value or weight) """
@@ -105,6 +105,7 @@ class Knapsack(object):
     def forward(self):
         """ Fill domain """
         self.items["order"] = np.nan
+        self.items["prune"] = 0
         prune_zero_values(self)
         prune(self)
         search_items = self.items.loc[self.items["take"].isnull()]
@@ -116,14 +117,14 @@ class Knapsack(object):
                 .format(cur_id, order, item))
             self.add_item(order, item)
             self.items.loc[cur_id, "order"] = order
-            logging.debug("eval_left value: {}"
-                .format(self.eval_left("value")))
-            logging.debug("eval_left weight: {}"
-                .format(self.eval_left("weight")))
+            for param in "value", "weight":
+                logging.debug("eval_left {}: {}"
+                    .format(param, self.eval_left(param)))
             order += 1
             prev_id = cur_id
             prune(self)
             self.feasibility_check()
+        self.items.drop("prune", axis=1, inplace=True)
 
     def backward(self):
         """ Find answer using filled domain """
@@ -150,7 +151,7 @@ class Knapsack(object):
 
             take = int(cur[ix] != prev[ix])
             self.items.loc[cur_id, "take"] = take
-            logging.debug("Take" if take else "Leave")
+            logging.debug(("Take {}" if take else "Leave {}").format(cur_id))
 
             ix -= weight if take else 0
             logging.debug("ix: {}".format(ix))
@@ -169,6 +170,7 @@ class Knapsack(object):
         logging.info("Filling domain")
         self.forward()
         logging.info("Finished forward")
+
         answer = self.backward()
         logging.info("Finished backward. Total time (sec): {}"
             .format(time.time() - t0))
