@@ -51,9 +51,6 @@ class Knapsack(object):
 
         self.result = 0
 
-    def __len__(self):
-        return self.grid.shape[0] - 1
-
     def __repr__(self):
         return "Knapsack. Capacity: {}, items: {}"\
             .format(self.capacity, self.n_items)
@@ -64,6 +61,10 @@ class Knapsack(object):
         ix = ((self.items["take"].isnull() & self.items["order"].isnull()) |
               (self.items["order"] > order))
         return self.items.loc[ix, col].sum()
+
+    def calculate_taken(self, value="value"):
+        """ Calculate total of taken items values (value or weight) """
+        return self.items.loc[self.items["take"] == 1, value].sum()
 
     def get_row(self, row_ix):
         """ Convert row from sparse into np.array """
@@ -94,7 +95,8 @@ class Knapsack(object):
     def forward(self):
         """ Fill domain """
         self.items["order"] = np.nan
-        prune_exceeded_capacity(self)
+        prune_zero_values(self)
+        prune(self)
         search_items = self.items.loc[self.items["take"].isnull()]
 
         order = 0
@@ -146,10 +148,8 @@ class Knapsack(object):
                 break
             cur = prev
 
-        # Since ix == 0, don't take rest items
-        self.items["take"].fillna(0, inplace=True)
-        # Calculate resulting value
-        self.result = self.items.loc[self.items["take"] == 1, "value"].sum()
+        prune_fill_rest(self)
+        self.result = self.calculate_taken("value")
         logging.debug("Final items:\n{}".format(self.items))
         return self.items.sort_index()["take"].astype(int).tolist()
 
@@ -162,7 +162,6 @@ class Knapsack(object):
     def solve(self):
         """ Run dynamic programming solver """
         t0 = time.time()
-        prune_zero_values(self)
         logging.info("Filling domain")
         self.forward()
         logging.info("Finished forward")

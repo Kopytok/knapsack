@@ -1,14 +1,76 @@
 import logging
 
 def prune(knapsack):
-    pass
+    """ Main pruning function. Prune oboth items and domain """
+    pruned = prune_items(knapsack)
+    if pruned:
+        pruned = prune_domain(knapsack)
+        return True
+    return False
+
+""" Items pruning part """
+
+def prune_items(knapsack):
+    """ Find items that must or must not be taken """
+    sequence = [
+        prune_exceeded_capacity,
+    ]
+    pruned = False
+    for func in sequence:
+        pruned = pruned or func(knapsack)
+        logging.debug(
+            "Number of solved items\nafter {}: {}/{}".format(
+                func.__name__,
+                (~knapsack.items["take"].isnull()).sum(),
+                knapsack.items.shape[0]))
+    return pruned
 
 def prune_zero_values(knapsack):
     """" Don't take items with 0 value """
     ix = (knapsack.items["value"] == 0)
     knapsack.items.loc[ix, "take"] = 0
+    if ix.sum() > 0:
+        logging.debug("Number of items with 0 value: {}"
+            .format(ix.sum()))
+        return True
+    return False
+
+def prune_fill_rest(knapsack):
+    """ Fill with 0 unsolved items.
+        Used in the end of backward stage """
+    knapsack.items["take"].fillna(0, inplace=True)
 
 def prune_exceeded_capacity(knapsack):
     """ Don't take items with weight > capacity """
     ix = (knapsack.items["weight"] > knapsack.capacity)
     knapsack.items.loc[ix, "take"] = 0
+    if ix.sum() > 0:
+        logging.debug("Number of items with too big weght: {}"
+            .format(ix.sum()))
+        return True
+    return False
+
+""" Domain pruning part """
+
+def prune_domain(knapsack):
+    """ Remove rows and columns from domain """
+    sequence = [
+        prune_remove_not_taken,
+        prune_remove_taken,
+    ]
+    pruned = False
+    for func in sequence:
+        pruned = pruned or func(knapsack)
+        logging.debug("Domain shape after {}: {}".format(
+            func.__name__,
+            knapsack.grid.shape))
+    return pruned
+
+def prune_remove_not_taken(knapsack):
+    """ Remove from domain rows for items with "take" == 0 """
+    pass
+
+def prune_remove_taken(knapsack):
+    """ Remove from domain rows for items with "take" == 1 and
+        decrease capacity by their weight """
+    pass
