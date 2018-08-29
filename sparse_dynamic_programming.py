@@ -34,21 +34,29 @@ def prepare_items(items=None, by=None):
             by = [by, else_by]
         df.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
-        df["take"] = np.nan
+        aux_columns = [
+            "take",
+            "avail_weight",
+            "avail_value",
+            "upper_weight",
+            "lower_weight",
+        ]
+        for col in aux_columns:
+            df[col] = np.nan
         logging.info("First 5 items:\n{}".format(df.head()))
         return df
-    return None
-
+    item_columns = ["value", "weight", "density", "take"]
+    return pd.DataFrame(columns=item_columns + aux_columns)
 
 class Knapsack(object):
     def __init__(self, n_items=0, capacity=0, items=None):
         self.n_items = n_items
         self.capacity = capacity
         self.items = prepare_items(items)
+        prune_zero_values(self)
 
         self.numbers = np.linspace(0, capacity, capacity + 1)
         self.grid = lil_matrix((n_items, capacity + 1))
-
         self.result = 0
 
     def __repr__(self):
@@ -89,6 +97,12 @@ class Knapsack(object):
         new_state = np.where(mask, row, 0)
         self.grid[ix, :] = new_state
 
+    def calculate_boundaries(self, ix):
+        """ Calculate useful values for taken item """
+        all_taken = self.items.loc[self.items["order"] <= ix]
+        self.items["upper_weight"] = \
+            min(all_taken["weight"].sum(), self.capacity) + 1
+
     def add_item(self, cur_id, item):
         """ Evaluate item and expand grid """
         weight, value = int(item["weight"]), int(item["value"])
@@ -97,6 +111,7 @@ class Knapsack(object):
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
         self.set_row(cur_id, new_state)
+        self.calculate_boundaries(cur_id)
         logging.debug("domain:\n{}".format(self.grid.todense()))
         if (new_state[weight:] == state[weight:]).all():
             logging.info("Filled 0 for item #{} (No change)".format(cur_id))
@@ -106,7 +121,6 @@ class Knapsack(object):
         """ Fill domain """
         self.items["order"] = np.nan
         self.items["prune"] = 0
-        prune_zero_values(self)
         prune(self)
         search_items = self.items.loc[self.items["take"].isnull()]
 
@@ -226,8 +240,8 @@ def main():
     import os.path as op
     import time
 
-    path = op.join("data", select_file_in("data"))
-    # path = "data/ks_4_0"
+    # path = op.join("data", select_file_in("data"))
+    path = "data/ks_4_0"
 
     knapsack = Knapsack().load(path)
     answer = knapsack.solve()
