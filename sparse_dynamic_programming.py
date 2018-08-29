@@ -87,18 +87,28 @@ class Knapsack(object):
         """ Calculate total of taken items values (value or weight) """
         return self.items.loc[self.items["take"] == 1, value].sum()
 
-    def get_row(self, row_ix):
+    def get_row(self, order, lower_weight, upper_weight):
         """ Convert row from sparse into np.array """
-        if row_ix > -1:
-            row = self.grid.tocsr()[row_ix, :].toarray()
+        logging.debug("get_row. order: {}, lower_weight: {}, upper_weight: {}"
+            .format(order, lower_weight, upper_weight))
+        if order > -1:
+            row = self.grid.tocsr()[order, lower_weight:upper_weight+1]\
+                .toarray()
             return np.maximum.accumulate(row, axis=1)[0]
-        return np.zeros(self.capacity + 1)
+        return np.zeros(upper_weight - lower_weight + 1)
 
-    def set_row(self, ix, row):
+    def set_row(self, ix, row, floor):
         """ Add new row to the grid bottom """
         mask = np.hstack([[False], row[1:] != row[:-1]])
-        new_state = np.where(mask, row, 0)
-        self.grid[ix, :] = new_state
+        lower_weight = np.argwhere(mask).min()
+        upper_weight = np.argwhere(mask).max()
+        logging.debug("set_row mask:\n{}\nlower_weight: {}\tupper_weight: {}"
+            .format(mask, lower_weight, upper_weight))
+        new_state = np.where(
+            mask[lower_weight:upper_weight+1],
+            row[lower_weight:upper_weight+1],
+            0)
+        self.grid[ix, floor+lower_weight:floor+upper_weight+1] = new_state
 
     def calculate_boundaries(self, ix):
         """ Calculate useful values for taken item """
@@ -113,16 +123,28 @@ class Knapsack(object):
 
     def add_item(self, order, item):
         """ Evaluate item and expand grid """
-        weight, value = int(item["weight"]), int(item["value"])
-        self.calculate_boundaries(item.name)
+        weight, value = item[["weight", "value"]].astype(int).tolist()
+        lower_weight, upper_weight = self.items.loc[
+            item.name,
+            ["lower_weight", "upper_weight"]].astype(int).tolist()
 
-        state = self.get_row(order - 1)
+        threshold = max(0, lower_weight - weight)
+        state = self.get_row(order - 1, threshold, upper_weight)
+        logging.debug("add_item state:\n{}".format(state))
+        logging.debug("add_item threshold: {}".format(threshold))
+
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
+        logging.debug("add_item if_add: {}".format(if_add))
         new_state = np.max([state, if_add], axis=0)
-        self.set_row(order, new_state)
+        logging.debug("add_item new_state: {}".format(new_state))
+
+        self.set_row(order, new_state, threshold)
         logging.debug("items:\n{}".format(self.items.T))
         logging.debug("domain:\n{}".format(self.grid.todense()))
-        if (new_state[weight:] == state[weight:]).all():
+        if (new_state != state).all():
+            self.items.loc[item.name, "take"] = 1
+            logging.info("Filled 1 for item #{} (All changed)".format(order))
+        elif (new_state == state).all():
             logging.info("Filled 0 for item #{} (No change)".format(order))
             self.items.loc[order, "take"] = 0
 
@@ -139,9 +161,10 @@ class Knapsack(object):
         order = 0
         prev_id = -1
         for cur_id, item in search_items.iterrows():
-            logging.debug("Forward. cur_id: {}\torder: {}\titem:\n{}"
-                .format(cur_id, order, item))
             self.items.loc[cur_id, "order"] = order
+            self.calculate_boundaries(cur_id)
+            logging.debug("Forward. cur_id: {}\torder: {}\titem:\n{}"
+                .format(cur_id, order, self.items.loc[item.name]))
             self.add_item(order, item)
             for param in "value", "weight":
                 logging.debug("eval_left {}: {}"
@@ -159,8 +182,7 @@ class Knapsack(object):
         logging.debug("Backward search items:\n{}".format(search_items))
 
         last_item_id = search_items["order"].max()
-        last = self.get_row(last_item_id)
-        ix = np.argmax(last)
+        ix = int(self.grid.tocsr()[-1, :].argmax())
         logging.debug("Result ix: {}".format(ix))
 
         prev_id = -1
@@ -169,13 +191,16 @@ class Knapsack(object):
                 .format(cur_id, item))
             weight = int(item["weight"])
 
+            order = item["order"]
+            lower_bound = max(0, int(item["lower_weight"] - weight))
             if prev_id == -1:
-                cur = self.get_row(item["order"])
-            prev = self.get_row(item["order"] - 1)
-            logging.debug("cur[ix]: {}".format(cur[ix]))
-            logging.debug("prev[ix]: {}".format(prev[ix]))
+                cur = self.get_row(order, lower_bound,ix)
+            prev = self.get_row(order - 1, lower_bound,ix)
 
-            take = int(cur[ix] != prev[ix])
+            check_ix = ix - lower_bound
+            logging.debug("cur[ix]: {}".format(cur[check_ix]))
+            logging.debug("prev[ix]: {}".format(prev[check_ix]))
+            take = int(cur[check_ix] != prev[check_ix])
             self.items.loc[cur_id, "take"] = take
             logging.debug(("Take {}" if take else "Leave {}").format(cur_id))
 
@@ -187,7 +212,7 @@ class Knapsack(object):
 
         prune_fill_rest(self)
         self.result = self.calculate_taken("value")
-        logging.debug("Final items:\n{}".format(self.items))
+        logging.debug("Final items:\n{}".format(self.items.T))
         return self.answer()
 
     def solve(self):
@@ -252,8 +277,8 @@ def main():
     import os.path as op
     import time
 
-    # path = op.join("data", select_file_in("data"))
-    path = "data/ks_4_0"
+    path = op.join("data", select_file_in("data"))
+    # path = "data/ks_4_0"
 
     knapsack = Knapsack().load(path)
     answer = knapsack.solve()
