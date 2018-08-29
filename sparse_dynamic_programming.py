@@ -102,8 +102,8 @@ class Knapsack(object):
         mask = np.hstack([[False], row[1:] != row[:-1]])
         lower_weight = np.argwhere(mask).min()
         upper_weight = np.argwhere(mask).max()
-        logging.debug("set_row mask:\n{}\nlower_weight: {}\tupper_weight: {}"
-            .format(mask, lower_weight, upper_weight))
+        logging.debug("set_row lower_weight: {}\tupper_weight: {}"
+            .format(lower_weight, upper_weight))
         new_state = np.where(
             mask[lower_weight:upper_weight+1],
             row[lower_weight:upper_weight+1],
@@ -129,18 +129,14 @@ class Knapsack(object):
             ["lower_weight", "upper_weight"]].astype(int).tolist()
 
         threshold = max(0, lower_weight - weight)
-        state = self.get_row(order - 1, threshold, upper_weight)
-        logging.debug("add_item state:\n{}".format(state))
         logging.debug("add_item threshold: {}".format(threshold))
-
+        state = self.get_row(order - 1, threshold, upper_weight)
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
-        logging.debug("add_item if_add: {}".format(if_add))
         new_state = np.max([state, if_add], axis=0)
-        logging.debug("add_item new_state: {}".format(new_state))
 
         self.set_row(order, new_state, threshold)
-        logging.debug("items:\n{}".format(self.items.T))
-        logging.debug("domain:\n{}".format(self.grid.todense()))
+        # logging.debug("items:\n{}".format(self.items.T))
+        # logging.debug("domain:\n{}".format(self.grid.todense()))
         if (new_state != state).all():
             self.items.loc[item.name, "take"] = 1
             logging.info("Filled 1 for item #{} (All changed)".format(order))
@@ -166,9 +162,6 @@ class Knapsack(object):
             logging.debug("Forward. cur_id: {}\torder: {}\titem:\n{}"
                 .format(cur_id, order, self.items.loc[item.name]))
             self.add_item(order, item)
-            for param in "value", "weight":
-                logging.debug("eval_left {}: {}"
-                    .format(param, self.eval_left(param)))
             order += 1
             prev_id = cur_id
             self.prune()
@@ -189,18 +182,13 @@ class Knapsack(object):
         for cur_id, item in search_items.iterrows():
             logging.debug("Backward. cur_id: {}\titem:\n{}"
                 .format(cur_id, item))
-            weight = int(item["weight"])
-
-            order = item["order"]
-            lower_bound = max(0, int(item["lower_weight"] - weight))
+            weight, order = item[["weight", "order"]].astype(int).tolist()
+            lower_bound = max(0, item["lower_weight"].astype(int) - weight)
             if prev_id == -1:
-                cur = self.get_row(order, lower_bound,ix)
-            prev = self.get_row(order - 1, lower_bound,ix)
+                cur = self.get_row(order, ix, ix+1)
+            prev = self.get_row(order - 1, ix, ix+1)
 
-            check_ix = ix - lower_bound
-            logging.debug("cur[ix]: {}".format(cur[check_ix]))
-            logging.debug("prev[ix]: {}".format(prev[check_ix]))
-            take = int(cur[check_ix] != prev[check_ix])
+            take = int(cur[0] != prev[0])
             self.items.loc[cur_id, "take"] = take
             logging.debug(("Take {}" if take else "Leave {}").format(cur_id))
 
