@@ -75,7 +75,6 @@ class Knapsack(object):
     def prepare_items_for_dp(self):
         aux_columns = [
             "order",
-            "avail_weight",
             "avail_value",
             "upper_weight",
             "lower_weight",
@@ -103,24 +102,29 @@ class Knapsack(object):
 
     def calculate_boundaries(self, ix):
         """ Calculate useful values for taken item """
-        all_taken = self.items.loc[self.items["order"] <= ix]
-        self.items["upper_weight"] = \
-            min(all_taken["weight"].sum(), self.capacity) + 1
+        order = self.items.loc[ix, "order"]
+        all_taken = self.items.loc[self.items["order"] <= order]
+        self.items.loc[ix, "upper_weight"] = \
+            min(all_taken["weight"].sum(), self.capacity)
+        self.items.loc[ix, "avail_value"] = self.eval_left("value", order)
+        self.items.loc[ix, "lower_weight"] = \
+            max(0, self.capacity - self.eval_left("weight", order)
+                - self.items.loc[ix, "weight"])
 
-    def add_item(self, cur_id, item):
+    def add_item(self, order, item):
         """ Evaluate item and expand grid """
         weight, value = int(item["weight"]), int(item["value"])
+        self.calculate_boundaries(item.name)
 
-        state = self.get_row(cur_id - 1)
+        state = self.get_row(order - 1)
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
-        self.set_row(cur_id, new_state)
-        self.calculate_boundaries(cur_id)
-        logging.debug("items:\n{}".format(self.items))
+        self.set_row(order, new_state)
+        logging.debug("items:\n{}".format(self.items.T))
         logging.debug("domain:\n{}".format(self.grid.todense()))
         if (new_state[weight:] == state[weight:]).all():
-            logging.info("Filled 0 for item #{} (No change)".format(cur_id))
-            self.items.loc[cur_id, "take"] = 0
+            logging.info("Filled 0 for item #{} (No change)".format(order))
+            self.items.loc[order, "take"] = 0
 
     def prune(self):
         """ Use prune as method """
@@ -137,8 +141,8 @@ class Knapsack(object):
         for cur_id, item in search_items.iterrows():
             logging.debug("Forward. cur_id: {}\torder: {}\titem:\n{}"
                 .format(cur_id, order, item))
-            self.add_item(order, item)
             self.items.loc[cur_id, "order"] = order
+            self.add_item(order, item)
             for param in "value", "weight":
                 logging.debug("eval_left {}: {}"
                     .format(param, self.eval_left(param)))
