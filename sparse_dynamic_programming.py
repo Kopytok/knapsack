@@ -55,6 +55,10 @@ class Knapsack(object):
         return "Knapsack. Capacity: {}, items: {}"\
             .format(self.capacity, self.n_items)
 
+    def answer(self):
+        """ Return answer as sequence of zeros and ones """
+        return self.items.sort_index()["take"].astype(int).tolist()
+
     def eval_left(self, col="value", order=None):
         """ Return sum of col for untouched items """
         order = order or self.capacity
@@ -151,7 +155,7 @@ class Knapsack(object):
         prune_fill_rest(self)
         self.result = self.calculate_taken("value")
         logging.debug("Final items:\n{}".format(self.items))
-        return self.items.sort_index()["take"].astype(int).tolist()
+        return self.answer()
 
     def feasibility_check(self):
         """ Check if total weight of taken items is
