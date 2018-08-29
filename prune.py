@@ -69,6 +69,12 @@ def prune_domain(knapsack):
             knapsack.grid.shape))
     return pruned
 
+def prune_clean_backward(knapsack, order):
+    """ Remove from domain rows, observed after order """
+    knapsack.grid = lil_matrix(knapsack.grid[:order,:])
+    logging.debug("Number of items in domain after prune_clean_backward: {}"
+        .format(knapsack.grid.count_nonzero()))
+
 def prune_remove_not_taken(knapsack):
     """ Remove from domain rows for items with "take" == 0 """
     prune_incomming_not_taken(knapsack)
