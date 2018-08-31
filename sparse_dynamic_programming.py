@@ -18,13 +18,6 @@ logging.basicConfig(level=logging.DEBUG,
         logging.StreamHandler(),
     ])
 
-def read_item(line):
-    """ Read one knapsack item """
-    value, weight = map(int, line.split())
-    return Item(value, weight, value / weight)
-
-Item = namedtuple("Item", ["value", "weight", "density"])
-
 def prepare_items(items=None, by=None):
     """ Convert list of namedtuples into dataframe and sort it """
     if items:
@@ -103,8 +96,8 @@ class Knapsack(object):
         mask = np.hstack([[False], row[1:] != row[:-1]])
         lower_weight = np.argwhere(mask).min()
         upper_weight = np.argwhere(mask).max()
-        logging.debug("set_row lower_weight: {}\tupper_weight: {}"
-            .format(lower_weight, upper_weight))
+        logging.debug("order: {}\tset_row lower_weight: {}\tupper_weight: {}"
+            .format(ix, lower_weight, upper_weight))
         new_state = np.where(
             mask[lower_weight:upper_weight+1],
             row[lower_weight:upper_weight+1],
@@ -124,26 +117,28 @@ class Knapsack(object):
 
     def add_item(self, order, item):
         """ Evaluate item and expand grid """
-        weight, value = item[["weight", "value"]].astype(int).tolist()
+        weight, value = int(item["weight"]), item["value"]
+        logging.debug("weight: {}\tvalue: {}".format(weight, value))
         lower_weight, upper_weight = self.items.loc[
             item.name,
             ["lower_weight", "upper_weight"]].astype(int).tolist()
 
-        threshold = max(0, lower_weight - weight)
-        logging.debug("add_item threshold: {}".format(threshold))
-        state = self.get_row(order - 1, threshold, upper_weight)
+        thresh = max(0, lower_weight - weight)
+        logging.debug("add_item threshold: {}".format(thresh))
+        state = self.get_row(order - 1, thresh, upper_weight)
         if_add = np.hstack([state[:weight], (state + value)[:-weight]])
         new_state = np.max([state, if_add], axis=0)
 
-        self.set_row(order, new_state, threshold)
-        logging.debug("items:\n{}".format(self.items.T))
-        logging.debug("domain:\n{}".format(self.grid.todense()))
+        self.set_row(order, new_state, thresh)
+        # logging.debug("items:\n{}".format(self.items.T))
+        # logging.debug("domain:\n{}".format(self.grid.todense()))
+        item_id = item.name
         if (new_state != state).all():
             self.items.loc[item.name, "take"] = 1
-            logging.info("Filled 1 for item #{} (All changed)".format(order))
+            logging.info("Filled 1 for item {} (All changed)".format(item_id))
             return True
         elif (new_state == state).all():
-            logging.info("Filled 0 for item #{} (No change)".format(order))
+            logging.info("Filled 0 for item {} (No change)".format(item_id))
             self.items.loc[order, "take"] = 0
             prune_clean_one(self, order)
             return False
@@ -176,7 +171,8 @@ class Knapsack(object):
 
     def backward(self):
         """ Find answer using filled domain """
-        ix = int(self.grid.tocsr()[-1, :].argmax())
+        max_order = self.items["order"].max() # TODO Fix
+        ix = int(self.grid.tocsr()[max_order, :].argmax())
         logging.debug("Result ix: {}".format(ix))
 
         while ix > 0:
@@ -219,10 +215,13 @@ class Knapsack(object):
         n_items, capacity = map(int, items[0].split())
         logging.info("New data: {} items, {} capacity"
             .format(n_items, capacity))
+
+        Item = namedtuple("Item", ["value", "weight", "density"])
         items_list = list()
         for item in items[1:]:
             if item.strip():
-                row = read_item(item)
+                value, weight = map(int, item.split())
+                row = Item(value, weight, value / weight)
                 items_list.append(row)
         knapsack = cls(n_items, capacity, items_list)
         return knapsack
@@ -257,7 +256,7 @@ def main():
     import time
 
     path = op.join("data", select_file_in("data"))
-    # path = "data/ks_19_0"
+    # path = "data/ks_500_0"
 
     knapsack = Knapsack().load(path)
     answer = knapsack.solve()

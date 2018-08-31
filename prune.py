@@ -23,7 +23,7 @@ def prune_items(knapsack):
     for func in sequence:
         pruned = pruned or func(knapsack)
         logging.debug(
-            "Number of solved items\nafter {}: {}/{}".format(
+            "Number of solved items after {}: {}/{}".format(
                 func.__name__,
                 (~knapsack.items["take"].isnull()).sum(),
                 knapsack.items.shape[0]))
@@ -74,8 +74,8 @@ def prune_domain(knapsack):
 def prune_clean_backward(knapsack, order):
     """ Remove from domain rows, observed after order """
     knapsack.grid = lil_matrix(knapsack.grid[:order,:])
-    logging.debug("Number of items in domain after prune_clean_backward: {}"
-        .format(knapsack.grid.count_nonzero()))
+    logging.debug("Number of items in domain: {}\tdomain shape: {}"
+        .format(knapsack.grid.count_nonzero(), knapsack.grid.shape))
 
 def prune_clean_one(knapsack, order):
     """ Remove row with index order from domain """
@@ -84,7 +84,8 @@ def prune_clean_one(knapsack, order):
         knapsack.grid[order+1:, :]
     ]).tolil()
     knapsack.items.loc[knapsack.items["order"] == order, "order"] = np.nan
-    logging.debug("Removed row {} from domain".format(order))
+    logging.debug("Removed row {} from domain, shape: {}"
+        .format(order, knapsack.grid.shape))
 
 def prune_remove_not_taken(knapsack):
     """ Remove from domain rows for items with "take" == 0 """
