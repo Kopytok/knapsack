@@ -119,7 +119,7 @@ class Knapsack(object):
 
     def get_result(self):
         """ Return sum of values of taken items """
-        return self.items.loc[np.where(self.items["take"])[0], "value"].astype(int).sum()
+        return self.items.loc[self.items["take"] == 1, "value"].astype(int).sum()
 
     def eval_left(self, param="value", order=None):
         """ Return sum of param for untouched items """
@@ -177,6 +177,9 @@ class Knapsack(object):
                 order += 1
             else:
                 self.items.loc[cur_id, "order"] = np.nan
+                self.items.loc[cur_id, "take"] = 0
+            logging.debug("Number of unsolved items: {}".format(
+                self.items[["order", "take"]].isnull().all(1).sum()))
             logging.debug("Number of items in domain: {}"
                 .format(self.grid.count_nonzero()))
             self.prune()
@@ -191,7 +194,6 @@ class Knapsack(object):
 
         while ix > 0:
             col = self.grid.tocsr()[:, :ix+1].max(1)
-            logging.debug("col:\n{}".format(col))
             order = np.argmax(col)
             item_id = self.items["order"] == order
             logging.debug("Take item with order {}".format(order))

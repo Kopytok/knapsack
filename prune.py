@@ -77,17 +77,6 @@ def prune_clean_backward(knapsack, order):
     logging.debug("Number of items in domain: {}\tdomain shape: {}"
         .format(knapsack.grid.count_nonzero(), knapsack.grid.shape))
 
-def prune_clean_one(knapsack, order):
-    """ Remove row with index order from domain """
-    knapsack.grid = vstack([
-        knapsack.grid[:order, :],
-        knapsack.grid[order+1:, :]
-    ]).tolil()
-    knapsack.items.loc[knapsack.items["order"] == order, "take"] = 0 # Redundant
-    knapsack.items.loc[knapsack.items["order"] == order, "order"] = np.nan
-    logging.debug("Removed row {} from domain, shape: {}"
-        .format(order, knapsack.grid.shape))
-
 def prune_remove_not_taken(knapsack):
     """ Remove from domain rows for items with "take" == 0 """
     prune_incomming_not_taken(knapsack)
@@ -95,12 +84,14 @@ def prune_remove_not_taken(knapsack):
 
 def prune_incomming_not_taken(knapsack):
     """ Decrease number of rows in domain by number of not taken items """
-    ix = (knapsack.items[["take", "prune"]] == 0).all(1)
-    subtrahend = ix.sum()
-    if subtrahend:
-        knapsack.items.loc[ix, "prune"] = 1
-        knapsack.grid = lil_matrix(knapsack.grid[:-subtrahend, :])
-        logging.debug("Decreased domain n_rows by {}".format(subtrahend))
+    # TODO Analyze
+    pass
+    # ix = (knapsack.items[["take", "prune"]] == 0).all(1)
+    # subtrahend = ix.sum()
+    # if subtrahend:
+    #     knapsack.items.loc[ix, "prune"] = 1
+    #     knapsack.grid = lil_matrix(knapsack.grid[:-subtrahend, :])
+    #     logging.debug("Decreased domain n_rows by {}".format(subtrahend))
 
 def prune_observed_not_taken(knapsack):
     """ Remove from domain rows for observed not taken items """
