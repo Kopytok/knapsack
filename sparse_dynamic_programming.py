@@ -33,24 +33,24 @@ def prepare_items(items=None, by=None):
         return df
     return pd.DataFrame(columns=["value", "weight", "density", "take"])
 
-def forward_step(domain, item, order):
+def forward_step(domain, item, order, state):
     """ Make DP forward step """
+    logging.debug("Item:\n{}".format(item))
     weight, value = int(item["weight"]), item["value"]
     lower_weight, upper_weight = \
         map(int, item[["lower_weight", "upper_weight"]].tolist())
     if order == 0:
         domain[order, weight] = value
         order += 1
+        state[0, weight] = value
         return True
-
-    values, indeces = domain.data[order-1], domain.rows[order-1]
-
+    values, indeces = state.data[0], state.rows[0]
     first_index = max([w for w in indeces
                        if w <= lower_weight - weight] or [0])
 
     compare = deque()
     compare_col = first_index + weight
-    compare_val = domain[order-1, first_index] + value
+    compare_val = state[0, first_index] + value
     compare_col = max(lower_weight, 0 + weight)
 
     changed = False
@@ -58,7 +58,6 @@ def forward_step(domain, item, order):
     for col, val in zip(indeces, values):
         if lower_weight - weight < col <= upper_weight - weight:
             compare.append((col + weight, val + value))
-
         if lower_weight <= col <= upper_weight:
             # Go through all items in compare less than col
             while compare_col < col:
@@ -66,7 +65,8 @@ def forward_step(domain, item, order):
                 # skip it in other case
                 if compare_val > cur_max:
                     changed = True
-                    domain[order, compare_col] = cur_max = compare_val
+                    domain[order, compare_col] = state[0, compare_col]\
+                        = cur_max = compare_val
                 # Take next item from queue in any case
                 try:
                     compare_col, compare_val = compare.popleft()
@@ -76,19 +76,22 @@ def forward_step(domain, item, order):
             # and update cur_max
             if compare_col == col and cur_max < compare_val > val:
                 changed = True
-                domain[order, compare_col] = cur_max = compare_val
+                domain[order, compare_col] = state[0, compare_col]\
+                    = cur_max = compare_val
             elif val > cur_max:
                 domain[order, col] = cur_max = val
     # Fill rest
     while True:
         if compare_val > cur_max:
-            domain[order, compare_col] = cur_max = compare_val
+            domain[order, compare_col] = state[0, compare_col]\
+                = cur_max = compare_val
             changed = True
         try:
             compare_col, compare_val = compare.popleft()
         except IndexError as e:
             break
     logging.debug("Changed: {}\n".format(changed))
+    state = state[:, lower_weight:upper_weight+1]
     return changed
 
 
@@ -165,19 +168,23 @@ class Knapsack(object):
         search_items = self.items.loc[self.items["take"].isnull()]
 
         order = 0
+        state = lil_matrix((1, self.capacity + 1))
         for cur_id, item in search_items.iterrows():
             if ~np.isnan(self.items.loc[cur_id, "take"]):
                 continue
             self.items.loc[cur_id, "order"] = order
             self.calculate_boundaries(cur_id)
-            logging.debug("Forward. cur_id: {}\torder: {}\titem:\n{}"
+            logging.debug("Forward. order: {}\titem:\n{}"
                 .format(cur_id, order, self.items.loc[item.name]))
-            changed = forward_step(self.grid, self.items.loc[cur_id], order)
+            changed = forward_step(self.grid, self.items.loc[cur_id], order,
+                                   state)
             if changed:
                 order += 1
             else:
                 self.items.loc[cur_id, "order"] = np.nan
                 self.items.loc[cur_id, "take"] = 0
+            logging.debug("Number of items in state: {}"
+                .format(state.count_nonzero()))
             logging.debug("Number of unsolved items: {}".format(
                 self.items[["order", "take"]].isnull().all(1).sum()))
             logging.debug("Number of items in domain: {}"
