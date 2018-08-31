@@ -196,11 +196,11 @@ class Knapsack(object):
 
     def backward(self):
         """ Find answer using filled domain """
-        max_order = self.items["order"].max() # Redundant. Should be last row.
+        max_order = order = self.items["order"].max() # Redundant. Should be last row.
         ix = int(self.grid.tocsr()[max_order, :].argmax())
         logging.debug("Result ix: {}".format(ix))
 
-        while ix > 0:
+        while ix > 0 and order > 0: # Order should be redundant
             col = self.grid.tocsr()[:, :ix+1].max(1)
             order = np.argmax(col)
             item_id = self.items["order"] == order
