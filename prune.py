@@ -83,6 +83,7 @@ def prune_clean_one(knapsack, order):
         knapsack.grid[:order, :],
         knapsack.grid[order+1:, :]
     ]).tolil()
+    knapsack.items.loc[knapsack.items["order"] == order, "take"] = 0 # Redundant
     knapsack.items.loc[knapsack.items["order"] == order, "order"] = np.nan
     logging.debug("Removed row {} from domain, shape: {}"
         .format(order, knapsack.grid.shape))
