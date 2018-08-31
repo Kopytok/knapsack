@@ -91,7 +91,8 @@ def forward_step(domain, item, order, state):
         except IndexError as e:
             break
     logging.debug("Changed: {}\n".format(changed))
-    state = state[:, lower_weight:upper_weight+1]
+    state[:, :lower_weight] = 0
+    state[:, upper_weight+1:] = 0
     return changed
 
 
