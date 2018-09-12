@@ -20,17 +20,17 @@ logging.basicConfig(level=logging.INFO,
 
 def prepare_items(items=None, by=None):
     """ Convert list of namedtuples into dataframe and sort it """
-    if items:
-        df = pd.DataFrame(items)
+    if isinstance(items, pd.DataFrame):
+        items["density"] = items.eval("value / weight")
         if not by:
-            by = "density" if df["density"].std() > 0.2 else "value"
+            by = "density" if items["density"].std() > 0.2 else "value"
             else_by = "density" if by != "density" else "value"
             by = [by, else_by]
-        df.sort_values(by, ascending=False, inplace=True)
+        items.sort_values(by, ascending=False, inplace=True)
         logging.info("Sorted by {}".format(by))
-        df["take"] = np.nan
-        logging.info("First 5 items:\n{}".format(df.head()))
-        return df
+        items["take"] = np.nan
+        logging.info("First 5 items:\n{}".format(items.head()))
+        return items
     return pd.DataFrame(columns=["value", "weight", "density", "take"])
 
 def forward_step(domain, item, order, prev_state):
@@ -96,10 +96,12 @@ def forward_step(domain, item, order, prev_state):
 
 
 class Knapsack(object):
-    def __init__(self, n_items=0, capacity=0, items=None):
-        self.n_items = n_items
+    def __init__(self, capacity=0, items=None):
         self.capacity = capacity
-        self.items = prepare_items(items)
+        self.items = prepare_items(items[["value", "weight"]])
+
+        n_items = items.shape[0] if isinstance(items, pd.DataFrame) else 0
+        self.n_items = n_items
         prune_zero_values(self)
 
         self.numbers = np.linspace(0, capacity, capacity + 1)
@@ -199,14 +201,15 @@ class Knapsack(object):
         self.grid = self.grid[:order, :]
         self.items.drop("prune", axis=1, inplace=True)
 
-    def backward(self, clean=True):
+    def backward(self, order=None, clean=True):
         """ Find answer using filled domain """
         logging.info("grid shape: {}".format(self.grid.shape))
+        order = order or self.grid.shape[0]
         ix = int(self.grid.tocsr().max(0).argmax())
         logging.info("Result ix: {}".format(ix))
 
         while ix > 0:
-            order = np.argmax(self.grid.tocsr()[:, ix])
+            order = np.argmax(self.grid.tocsr()[:order, ix])
             logging.info("Order of item to take: {}"
                 .format(order))
             item_id = self.items["order"] == order
@@ -222,8 +225,6 @@ class Knapsack(object):
                     .format(self.grid.count_nonzero(), self.grid.shape))
         # Fill rest
         self.items["take"].fillna(0, inplace=True)
-
-        logging.info("Final items:\n{}".format(self.items.T))
         self.result = self.get_result()
 
     def solve(self):
@@ -261,7 +262,8 @@ class Knapsack(object):
                 value, weight = map(int, item.split())
                 row = Item(value, weight, value / weight)
                 items_list.append(row)
-        knapsack = cls(n_items, capacity, items_list)
+        items = pd.DataFrame(items_list)
+        knapsack = cls(capacity, items)
         return knapsack
 
 
@@ -290,6 +292,7 @@ def select_file_in(folder, rows=8):
                 continue
 
 def main():
+    """ Solve one of tasks """
     import os.path as op
     import time
 
