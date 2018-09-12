@@ -39,11 +39,6 @@ def prune_zero_values(knapsack):
         return True
     return False
 
-def prune_fill_rest(knapsack):
-    """ Fill with 0 unsolved items.
-        Used in the end of backward stage """
-    knapsack.items["take"].fillna(0, inplace=True)
-
 def prune_exceeded_capacity(knapsack):
     """ Don't take items with weight > capacity """
     ix = (knapsack.items["weight"] > knapsack.capacity) & \
@@ -70,12 +65,6 @@ def prune_domain(knapsack):
             func.__name__,
             knapsack.grid.shape))
     return pruned
-
-def prune_clean_backward(knapsack, order):
-    """ Remove from domain rows, observed after order """
-    knapsack.grid = lil_matrix(knapsack.grid[:order,:])
-    logging.debug("Number of items in domain: {}\tdomain shape: {}"
-        .format(knapsack.grid.count_nonzero(), knapsack.grid.shape))
 
 def prune_remove_not_taken(knapsack):
     """ Remove from domain rows for items with "take" == 0 """

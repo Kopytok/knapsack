@@ -10,7 +10,7 @@ from scipy.sparse import lil_matrix, hstack
 
 from prune import *
 
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -35,7 +35,7 @@ def prepare_items(items=None, by=None):
 
 def forward_step(domain, item, order, prev_state):
     """ Make DP forward step """
-    logging.debug("Item:\n{}".format(item))
+    logging.info("Item:\n{}".format(item))
     weight, value = int(item["weight"]), item["value"]
     lower_weight, upper_weight = \
         map(int, item[["lower_weight", "upper_weight"]].tolist())
@@ -89,7 +89,7 @@ def forward_step(domain, item, order, prev_state):
             compare_col, compare_val = compare.popleft()
         except IndexError as e:
             break
-    logging.debug("Changed: {}\n".format(changed))
+    logging.info("Changed: {}\n".format(changed))
     state[:, :lower_weight] = 0
     state[:, upper_weight+1:] = 0
     return changed, state
@@ -174,7 +174,7 @@ class Knapsack(object):
                 continue
             self.items.loc[cur_id, "order"] = order
             self.calculate_boundaries(cur_id)
-            logging.debug("Forward. order: {}\titem:\n{}"
+            logging.info("Forward. order: {}\titem:\n{}"
                 .format(order, cur_id, self.items.loc[item.name]))
 
             changed, new_state = forward_step(self.grid,
@@ -189,36 +189,41 @@ class Knapsack(object):
                 self.grid[order, :] = 0
             logging.debug("Number of items in prev_state: {}"
                 .format(prev_state.count_nonzero()))
-            logging.debug("Number of unsolved items: {}".format(
-                self.items[["order", "take"]].isnull().all(1).sum()))
-            logging.debug("Number of items in domain: {}"
-                .format(self.grid.count_nonzero()))
+            if order % 25 == 0:
+                logging.debug("Number of unsolved items: {}".format(
+                    self.items[["order", "take"]].isnull().all(1).sum()))
+                logging.debug("Number of items in domain: {}"
+                    .format(self.grid.count_nonzero()))
             self.prune()
             self.feasibility_check()
         self.grid = self.grid[:order, :]
         self.items.drop("prune", axis=1, inplace=True)
 
-    def backward(self):
+    def backward(self, clean=True):
         """ Find answer using filled domain """
-        # max_order = order = self.items["order"].max() # Redundant. Should be last row.
-        logging.debug("grid shape: {}".format(self.grid.shape))
+        logging.info("grid shape: {}".format(self.grid.shape))
         ix = int(self.grid.tocsr().max(0).argmax())
-        logging.debug("Result ix: {}".format(ix))
+        logging.info("Result ix: {}".format(ix))
 
-        while ix > 0: # and order > 0: # Order should be redundant
+        while ix > 0:
             order = np.argmax(self.grid.tocsr()[:, ix])
-            logging.debug("Order of item to take: {}"
+            logging.info("Order of item to take: {}"
                 .format(order))
             item_id = self.items["order"] == order
-            logging.debug("Item id: {}".format(np.where(item_id)[0]))
-            logging.debug("Take item\n{}".format(self.items.loc[item_id].T))
+            logging.info("Item id: {}".format(np.where(item_id)[0]))
+            logging.info("Take item\n{}".format(self.items.loc[item_id].T))
             self.items.loc[item_id, "take"] = 1
             ix -= int(self.items.loc[item_id, "weight"])
-            logging.debug("Next ix: {}".format(ix))
-            prune_clean_backward(self, order)
+            logging.info("Next ix: {}".format(ix))
+            if clean:
+                # Remove rows with order higher than current order
+                self.grid = lil_matrix(self.grid[:order,:])
+                logging.debug("Number of items in domain: {}\tdomain shape: {}"
+                    .format(self.grid.count_nonzero(), self.grid.shape))
+        # Fill rest
+        self.items["take"].fillna(0, inplace=True)
 
-        prune_fill_rest(self)
-        logging.debug("Final items:\n{}".format(self.items.T))
+        logging.info("Final items:\n{}".format(self.items.T))
         self.result = self.get_result()
 
     def solve(self):
