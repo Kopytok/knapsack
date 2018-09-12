@@ -33,40 +33,41 @@ def prepare_items(items=None, by=None):
         return df
     return pd.DataFrame(columns=["value", "weight", "density", "take"])
 
-def forward_step(domain, item, order, state):
+def forward_step(domain, item, order, prev_state):
     """ Make DP forward step """
     logging.debug("Item:\n{}".format(item))
     weight, value = int(item["weight"]), item["value"]
     lower_weight, upper_weight = \
         map(int, item[["lower_weight", "upper_weight"]].tolist())
+
+    state = lil_matrix(prev_state, copy=True)
+
     if order == 0:
-        domain[order, weight] = value
-        order += 1
         state[0, weight] = value
-        return True
-    values, indeces = state.data[0], state.rows[0]
-    first_index = max([w for w in indeces
+        return True, state
+
+    values, indeces = prev_state.data[0], prev_state.rows[0]
+    lowest_index = max([w for w in indeces
                        if w <= lower_weight - weight] or [0])
 
     compare = deque()
-    compare_col = first_index + weight
-    compare_val = state[0, first_index] + value
+    compare_col = lowest_index + weight
+    compare_val = prev_state[0, lowest_index] + value
     compare_col = max(lower_weight, 0 + weight)
 
     changed = False
     cur_max = 0
     for col, val in zip(indeces, values):
-        if lower_weight - weight < col <= upper_weight - weight:
+        if lower_weight < col + weight <= upper_weight:
             compare.append((col + weight, val + value))
-        if lower_weight <= col <= upper_weight:
+        if lower_weight < col <= upper_weight:
             # Go through all items in compare less than col
             while compare_col < col:
                 # If compare_val > cur_max insert item, update cur_max
                 # skip it in other case
                 if compare_val > cur_max:
                     changed = True
-                    domain[order, compare_col] = state[0, compare_col]\
-                        = cur_max = compare_val
+                    state[0, compare_col] = cur_max = compare_val
                 # Take next item from queue in any case
                 try:
                     compare_col, compare_val = compare.popleft()
@@ -76,15 +77,13 @@ def forward_step(domain, item, order, state):
             # and update cur_max
             if compare_col == col and cur_max < compare_val > val:
                 changed = True
-                domain[order, compare_col] = state[0, compare_col]\
-                    = cur_max = compare_val
+                state[0, compare_col] = cur_max = compare_val
             elif val > cur_max:
-                domain[order, col] = cur_max = val
+                cur_max = val
     # Fill rest
     while True:
         if compare_val > cur_max:
-            domain[order, compare_col] = state[0, compare_col]\
-                = cur_max = compare_val
+            state[0, compare_col] = cur_max = compare_val
             changed = True
         try:
             compare_col, compare_val = compare.popleft()
@@ -93,7 +92,7 @@ def forward_step(domain, item, order, state):
     logging.debug("Changed: {}\n".format(changed))
     state[:, :lower_weight] = 0
     state[:, upper_weight+1:] = 0
-    return changed
+    return changed, state
 
 
 class Knapsack(object):
@@ -169,42 +168,50 @@ class Knapsack(object):
         search_items = self.items.loc[self.items["take"].isnull()]
 
         order = 0
-        state = lil_matrix((1, self.capacity + 1))
+        prev_state = lil_matrix((1, self.capacity + 1))
         for cur_id, item in search_items.iterrows():
             if ~np.isnan(self.items.loc[cur_id, "take"]):
                 continue
             self.items.loc[cur_id, "order"] = order
             self.calculate_boundaries(cur_id)
             logging.debug("Forward. order: {}\titem:\n{}"
-                .format(cur_id, order, self.items.loc[item.name]))
-            changed = forward_step(self.grid, self.items.loc[cur_id], order,
-                                   state)
+                .format(order, cur_id, self.items.loc[item.name]))
+
+            changed, new_state = forward_step(self.grid,
+                self.items.loc[cur_id], order, prev_state)
+
             if changed:
+                self.grid[order, :] = prev_state = new_state
                 order += 1
             else:
                 self.items.loc[cur_id, "order"] = np.nan
                 self.items.loc[cur_id, "take"] = 0
-            logging.debug("Number of items in state: {}"
-                .format(state.count_nonzero()))
+                self.grid[order, :] = 0
+            logging.debug("Number of items in prev_state: {}"
+                .format(prev_state.count_nonzero()))
             logging.debug("Number of unsolved items: {}".format(
                 self.items[["order", "take"]].isnull().all(1).sum()))
             logging.debug("Number of items in domain: {}"
                 .format(self.grid.count_nonzero()))
             self.prune()
             self.feasibility_check()
+        self.grid = self.grid[:order, :]
         self.items.drop("prune", axis=1, inplace=True)
 
     def backward(self):
         """ Find answer using filled domain """
-        max_order = order = self.items["order"].max() # Redundant. Should be last row.
-        ix = int(self.grid.tocsr()[max_order, :].argmax())
+        # max_order = order = self.items["order"].max() # Redundant. Should be last row.
+        logging.debug("grid shape: {}".format(self.grid.shape))
+        ix = int(self.grid.tocsr().max(0).argmax())
         logging.debug("Result ix: {}".format(ix))
 
-        while ix > 0 and order > 0: # Order should be redundant
-            col = self.grid.tocsr()[:, :ix+1].max(1)
-            order = np.argmax(col)
+        while ix > 0: # and order > 0: # Order should be redundant
+            order = np.argmax(self.grid.tocsr()[:, ix])
+            logging.debug("Order of item to take: {}"
+                .format(order))
             item_id = self.items["order"] == order
-            logging.debug("Take item with order {}".format(order))
+            logging.debug("Item id: {}".format(np.where(item_id)[0]))
+            logging.debug("Take item\n{}".format(self.items.loc[item_id].T))
             self.items.loc[item_id, "take"] = 1
             ix -= int(self.items.loc[item_id, "weight"])
             logging.debug("Next ix: {}".format(ix))
