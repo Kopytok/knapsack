@@ -33,13 +33,9 @@ def prepare_items(items=None, by=None):
         return items
     return pd.DataFrame(columns=["value", "weight", "density", "take"])
 
-def forward_step(domain, item, order, prev_state):
+def forward_step(domain, weight, value, lower_weight, upper_weight, order,
+        prev_state):
     """ Make DP forward step """
-    logging.info("Item:\n{}".format(item))
-    weight, value = int(item["weight"]), item["value"]
-    lower_weight, upper_weight = \
-        map(int, item[["lower_weight", "upper_weight"]].tolist())
-
     state = lil_matrix(prev_state, copy=True)
 
     if order == 0:
@@ -108,8 +104,7 @@ def backward_path(order, ix, grid, items, clean=False):
         logging.info("Take item {}:\n{}"
             .format(np.where(item_id)[0], items.loc[item_id].T))
         taken[np.where(item_id)[0]] = 1
-        if clean:
-            # Remove rows with order higher than current order
+        if clean: # Remove rows with order higher than current order
             grid = lil_matrix(grid[:order,:])
             logging.debug("Number of items in domain: {}\tdomain shape: {}"
                 .format(grid.count_nonzero(), grid.shape))
@@ -204,8 +199,14 @@ class Knapsack(object):
             logging.info("Forward. order: {}\titem:\n{}"
                 .format(order, cur_id, self.items.loc[item.name]))
 
-            changed, new_state = forward_step(self.grid,
-                self.items.loc[cur_id], order, prev_state)
+            item = self.items.loc[cur_id]
+            logging.info("Item:\n{}".format(item))
+            weight, value = int(item["weight"]), item["value"]
+            lower_weight, upper_weight = \
+                map(int, item[["lower_weight", "upper_weight"]].tolist())
+
+            changed, new_state = forward_step(self.grid, weight, value,
+                lower_weight, upper_weight, order, prev_state)
 
             if changed:
                 self.grid[order, :] = prev_state = new_state
