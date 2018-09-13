@@ -105,16 +105,17 @@ def backward_path(order, ix, grid, items, clean=False):
         order = np.argmax(grid.tocsr()[:order, ix])
         logging.info("Order of item to take: {}".format(order))
         item_id = (items["order"] == order)
-        logging.info("Item id: {}".format(np.where(item_id)[0]))
-        logging.info("Take item\n{}".format(items.loc[item_id].T))
+        logging.info("Take item {}:\n{}"
+            .format(np.where(item_id)[0], items.loc[item_id].T))
         taken[np.where(item_id)[0]] = 1
-        ix -= int(items.loc[item_id, "weight"])
-        logging.info("Next ix: {}".format(ix))
         if clean:
             # Remove rows with order higher than current order
             grid = lil_matrix(grid[:order,:])
             logging.debug("Number of items in domain: {}\tdomain shape: {}"
                 .format(grid.count_nonzero(), grid.shape))
+        # Decrease total weight by weight of taken item
+        ix -= int(items.loc[item_id, "weight"])
+        logging.info("Next ix: {}".format(ix))
     # Fill rest
     return taken
 
