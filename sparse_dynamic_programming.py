@@ -94,11 +94,35 @@ def forward_step(domain, item, order, prev_state):
     state[:, upper_weight+1:] = 0
     return changed, state
 
+def get_result(items):
+    """ Return sum of values of taken items """
+    return items.loc[items["take"] == 1, "value"].astype(int).sum()
+
+def backward_path(order, ix, grid, items, clean=False):
+    """ Find path to item with (order, ix) """
+    taken = np.zeros(items.shape[0])
+    while ix > 0:
+        order = np.argmax(grid.tocsr()[:order, ix])
+        logging.info("Order of item to take: {}".format(order))
+        item_id = (items["order"] == order)
+        logging.info("Item id: {}".format(np.where(item_id)[0]))
+        logging.info("Take item\n{}".format(items.loc[item_id].T))
+        taken[np.where(item_id)[0]] = 1
+        ix -= int(items.loc[item_id, "weight"])
+        logging.info("Next ix: {}".format(ix))
+        if clean:
+            # Remove rows with order higher than current order
+            grid = lil_matrix(grid[:order,:])
+            logging.debug("Number of items in domain: {}\tdomain shape: {}"
+                .format(grid.count_nonzero(), grid.shape))
+    # Fill rest
+    return taken
+
 
 class Knapsack(object):
     def __init__(self, capacity=0, items=None):
         self.capacity = capacity
-        self.items = prepare_items(items[["value", "weight"]])
+        self.items = prepare_items(items)
 
         n_items = items.shape[0] if isinstance(items, pd.DataFrame) else 0
         self.n_items = n_items
@@ -118,13 +142,13 @@ class Knapsack(object):
         assert self.items.loc[self.items["take"] == 1, "weight"].sum() \
             <= self.capacity, "Not feasible answer. Exceeded capacity."
 
+    def get_result(self):
+        """ Return sum of values of taken items """
+        return get_result(self.items)
+
     def get_answer(self):
         """ Return answer as sequence of zeros and ones """
         return self.items.sort_index()["take"].astype(int).tolist()
-
-    def get_result(self):
-        """ Return sum of values of taken items """
-        return self.items.loc[self.items["take"] == 1, "value"].astype(int).sum()
 
     def eval_left(self, param="value", order=None):
         """ Return sum of param for untouched items """
@@ -201,30 +225,17 @@ class Knapsack(object):
         self.grid = self.grid[:order, :]
         self.items.drop("prune", axis=1, inplace=True)
 
-    def backward(self, order=None, clean=True):
-        """ Find answer using filled domain """
+    def backward(self):
+        """ Find answer """
         logging.info("grid shape: {}".format(self.grid.shape))
-        order = order or self.grid.shape[0]
+
+        # Max value
         ix = int(self.grid.tocsr().max(0).argmax())
         logging.info("Result ix: {}".format(ix))
 
-        while ix > 0:
-            order = np.argmax(self.grid.tocsr()[:order, ix])
-            logging.info("Order of item to take: {}"
-                .format(order))
-            item_id = self.items["order"] == order
-            logging.info("Item id: {}".format(np.where(item_id)[0]))
-            logging.info("Take item\n{}".format(self.items.loc[item_id].T))
-            self.items.loc[item_id, "take"] = 1
-            ix -= int(self.items.loc[item_id, "weight"])
-            logging.info("Next ix: {}".format(ix))
-            if clean:
-                # Remove rows with order higher than current order
-                self.grid = lil_matrix(self.grid[:order,:])
-                logging.debug("Number of items in domain: {}\tdomain shape: {}"
-                    .format(self.grid.count_nonzero(), self.grid.shape))
-        # Fill rest
-        self.items["take"].fillna(0, inplace=True)
+        order = self.grid.shape[0]
+        self.items["take"] = \
+            backward_path(order, ix, self.grid, self.items, clean=True)
         self.result = self.get_result()
 
     def solve(self):
