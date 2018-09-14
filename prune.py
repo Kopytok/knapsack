@@ -5,7 +5,7 @@ import numpy as np
 from scipy.sparse import lil_matrix, vstack
 
 def prune(knapsack):
-    """ Main pruning function. Prune oboth items and domain """
+    """ Main pruning function """
     pruned = prune_items(knapsack)
     if pruned:
         pruned = prune_domain(knapsack)
@@ -45,7 +45,7 @@ def prune_exceeded_capacity(knapsack):
           knapsack.items["take"].isnull()
     knapsack.items.loc[ix, "take"] = 0
     if ix.sum() > 0:
-        logging.debug("Number of items with too big weght: {}"
+        logging.debug("Number of items with too big weight: {}"
             .format(ix.sum()))
         return True
     return False
@@ -61,9 +61,6 @@ def prune_domain(knapsack):
     pruned = False
     for func in sequence:
         pruned = pruned or func(knapsack)
-        logging.debug("Domain shape after {}: {}".format(
-            func.__name__,
-            knapsack.grid.shape))
     return pruned
 
 def prune_remove_not_taken(knapsack):
@@ -73,14 +70,7 @@ def prune_remove_not_taken(knapsack):
 
 def prune_incomming_not_taken(knapsack):
     """ Decrease number of rows in domain by number of not taken items """
-    # TODO Analyze
     pass
-    # ix = (knapsack.items[["take", "prune"]] == 0).all(1)
-    # subtrahend = ix.sum()
-    # if subtrahend:
-    #     knapsack.items.loc[ix, "prune"] = 1
-    #     knapsack.grid = lil_matrix(knapsack.grid[:-subtrahend, :])
-    #     logging.debug("Decreased domain n_rows by {}".format(subtrahend))
 
 def prune_observed_not_taken(knapsack):
     """ Remove from domain rows for observed not taken items """

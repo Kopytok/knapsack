@@ -33,100 +33,100 @@ def prepare_items(items=None, by=None):
         return items
     return pd.DataFrame(columns=["value", "weight", "density", "take"])
 
-def forward_step(domain, weight, value, lower_weight, upper_weight, order,
-        prev_state):
+def forward_step(item, state, paths):
     """ Make DP forward step """
-    state = lil_matrix(prev_state, copy=True)
+    logging.info("Item:\n{}".format(item))
+    weight, lower_weight, upper_weight = \
+        map(int, item[["weight", "lower_weight", "upper_weight"]].tolist())
+    value, item_id = item["value"], int(item.name)
 
-    if order == 0:
+    if len(paths) == 0:
         state[0, weight] = value
-        return True, state
+        paths[weight] = {item_id}
+        return
 
-    values, indeces = prev_state.data[0], prev_state.rows[0]
-    lowest_index = max([w for w in indeces
+    temp_state = lil_matrix(state, copy=True)
+    temp_paths = paths.copy()
+
+    values, weights = state.data[0], state.rows[0]
+    lowest_index = min([w for w in weights
                        if w <= lower_weight - weight] or [0])
 
-    compare = deque()
-    compare_col = lowest_index + weight
-    compare_val = prev_state[0, lowest_index] + value
-    compare_col = max(lower_weight, 0 + weight)
+    compare, compare_paths = deque(), deque()
+    # Initial values
+    compare_col  = lowest_index + weight
+    compare_val  = state[0, lowest_index] + value
+    compare_col  = max(lower_weight, 0 + weight)
+    compare_path = paths.get(lowest_index, set())
 
-    changed = False
     cur_max = 0
-    for col, val in zip(indeces, values):
-        if lower_weight < col + weight <= upper_weight:
+    for col, val in zip(weights, values):
+        if lower_weight <= col + weight <= upper_weight:
             compare.append((col + weight, val + value))
-        if lower_weight < col <= upper_weight:
+            compare_paths.append(paths.get(col, set()))
+        if lower_weight <= col <= upper_weight:
             # Go through all items in compare less than col
             while compare_col < col:
                 # If compare_val > cur_max insert item, update cur_max
                 # skip it in other case
                 if compare_val > cur_max:
-                    changed = True
-                    state[0, compare_col] = cur_max = compare_val
+                    # --> New item
+                    temp_state[0, compare_col] = cur_max = compare_val
+                    temp_paths[compare_col] = compare_path | {item_id}
                 # Take next item from queue in any case
                 try:
                     compare_col, compare_val = compare.popleft()
+                    compare_path = compare_paths.popleft()
                 except IndexError as e:
                     break
             # If compare_col == col and compare_val > val, insert copmare_val
             # and update cur_max
             if compare_col == col and cur_max < compare_val > val:
-                changed = True
-                state[0, compare_col] = cur_max = compare_val
+                # --> New item
+                temp_state[0, compare_col] = cur_max = compare_val
+                temp_paths[compare_col] = compare_path | {item_id}
             elif val > cur_max:
                 cur_max = val
     # Fill rest
     while True:
-        if compare_val > cur_max:
-            state[0, compare_col] = cur_max = compare_val
-            changed = True
+        if cur_max < compare_val:
+            # --> New item
+            temp_state[0, compare_col] = cur_max = compare_val
+            temp_paths[compare_col] = compare_path | {item_id}
         try:
             compare_col, compare_val = compare.popleft()
+            compare_path = compare_paths.popleft()
         except IndexError as e:
             break
-    logging.info("Changed: {}\n".format(changed))
-    state[:, :lower_weight] = 0
-    state[:, upper_weight+1:] = 0
-    return changed, state
+    for value, weight in zip(temp_state.data[0], temp_state.rows[0]):
+        # Replace values not in window
+        if lower_weight <= weight <= upper_weight:
+            state[0, weight] = value
+            paths[weight] = temp_paths[weight]
+        elif weight in paths:
+            state[0, 0] = 0
+            paths.pop(weight)
 
 def get_result(items):
     """ Return sum of values of taken items """
     return items.loc[items["take"] == 1, "value"].astype(int).sum()
 
-def backward_path(order, ix, grid, items, clean=False):
-    """ Find path to item with (order, ix) """
-    taken = np.zeros(items.shape[0])
-    while ix > 0:
-        order = np.argmax(grid.tocsr()[:order, ix])
-        logging.info("Order of item to take: {}".format(order))
-        item_id = (items["order"] == order)
-        logging.info("Take item {}:\n{}"
-            .format(np.where(item_id)[0], items.loc[item_id].T))
-        taken[np.where(item_id)[0]] = 1
-        if clean: # Remove rows with order higher than current order
-            grid = lil_matrix(grid[:order,:])
-            logging.debug("Number of items in domain: {}\tdomain shape: {}"
-                .format(grid.count_nonzero(), grid.shape))
-        # Decrease total weight by weight of taken item
-        ix -= int(items.loc[item_id, "weight"])
-        logging.info("Next ix: {}".format(ix))
-    # Fill rest
-    return taken
-
 
 class Knapsack(object):
     def __init__(self, capacity=0, items=None):
+        self.result = 0
+
         self.capacity = capacity
         self.items = prepare_items(items)
 
         n_items = items.shape[0] if isinstance(items, pd.DataFrame) else 0
         self.n_items = n_items
         prune_zero_values(self)
+        prune_exceeded_capacity(self)
 
-        self.numbers = np.linspace(0, capacity, capacity + 1)
-        self.grid = lil_matrix((n_items, capacity + 1))
-        self.result = 0
+        # Aux
+        self.state = lil_matrix((1, self.capacity + 1))
+        self.paths = dict()
 
     def __repr__(self):
         return "Knapsack. Capacity: {}, items: {}"\
@@ -138,6 +138,11 @@ class Knapsack(object):
         assert self.items.loc[self.items["take"] == 1, "weight"].sum() \
             <= self.capacity, "Not feasible answer. Exceeded capacity."
 
+    def get_free_space(self):
+        """ Return free space after taking items """
+        used_space = self.items.loc[self.items["take"], "weight"].sum()
+        return self.capacity - used_space
+
     def get_result(self):
         """ Return sum of values of taken items """
         return get_result(self.items)
@@ -148,21 +153,19 @@ class Knapsack(object):
 
     def eval_left(self, param="value", order=None):
         """ Return sum of param for untouched items """
-        order = order or self.capacity
-        ix = ((self.items["take"].isnull() & self.items["order"].isnull()) |
-              (self.items["order"] > order))
-        return self.items.loc[ix, param].sum()
+        order = order or 0
+        columns = [param, "take"]
+        tmp = self.items.loc[order:]
+        return tmp.loc[tmp["take"].isnull(), param].sum()
 
     def prepare_items_for_dp(self):
         aux_columns = [
-            "order",
             "avail_value",
             "upper_weight",
             "lower_weight",
         ]
         for col in aux_columns:
             self.items[col] = np.nan
-        self.items["prune"] = 0
 
     def calculate_taken(self, value="value"):
         """ Calculate total of taken items values (value or weight) """
@@ -170,74 +173,42 @@ class Knapsack(object):
 
     def calculate_boundaries(self, ix):
         """ Calculate useful values for taken item """
-        order = self.items.loc[ix, "order"]
-        all_taken = self.items.loc[self.items["order"] <= order]
-        self.items.loc[ix, "upper_weight"] = \
-            min(all_taken["weight"].sum(), self.capacity)
-        self.items.loc[ix, "avail_value"] = self.eval_left("value", order)
-        self.items.loc[ix, "lower_weight"] = \
-            max(0, self.capacity - self.eval_left("weight", order)
-                - self.items.loc[ix, "weight"])
+        all_taken = self.items.loc[:ix, "weight"].sum()
+        self.items.loc[ix, "upper_weight"] = min(all_taken, self.capacity)
+        self.items.loc[ix, "avail_value"] = self.eval_left("value", ix)
+        self.items.loc[ix, "lower_weight"] = max(0, self.capacity -
+            self.eval_left("weight", ix) - self.items.loc[ix, "weight"])
 
     def prune(self):
-        """ Use prune as method """
+        """ Prune as method """
         return prune(self)
 
     def forward(self):
         """ Fill domain """
         self.prepare_items_for_dp()
-        self.prune()
         search_items = self.items.loc[self.items["take"].isnull()]
 
-        order = 0
-        prev_state = lil_matrix((1, self.capacity + 1))
-        for cur_id, item in search_items.iterrows():
+        for order, (cur_id, item) in enumerate(search_items.iterrows()):
             if ~np.isnan(self.items.loc[cur_id, "take"]):
                 continue
-            self.items.loc[cur_id, "order"] = order
+            logging.info("Forward. order: {}".format(order, cur_id))
+
             self.calculate_boundaries(cur_id)
-            logging.info("Forward. order: {}\titem:\n{}"
-                .format(order, cur_id, self.items.loc[item.name]))
-
             item = self.items.loc[cur_id]
-            logging.info("Item:\n{}".format(item))
-            weight, value = int(item["weight"]), item["value"]
-            lower_weight, upper_weight = \
-                map(int, item[["lower_weight", "upper_weight"]].tolist())
-
-            changed, new_state = forward_step(self.grid, weight, value,
-                lower_weight, upper_weight, order, prev_state)
-
-            if changed:
-                self.grid[order, :] = prev_state = new_state
-                order += 1
-            else:
-                self.items.loc[cur_id, "order"] = np.nan
-                self.items.loc[cur_id, "take"] = 0
-                self.grid[order, :] = 0
-            logging.debug("Number of items in prev_state: {}"
-                .format(prev_state.count_nonzero()))
-            if order % 25 == 0:
-                logging.debug("Number of unsolved items: {}".format(
-                    self.items[["order", "take"]].isnull().all(1).sum()))
-                logging.debug("Number of items in domain: {}"
-                    .format(self.grid.count_nonzero()))
+            forward_step(item, self.state, self.paths)
             self.prune()
             self.feasibility_check()
-        self.grid = self.grid[:order, :]
-        self.items.drop("prune", axis=1, inplace=True)
 
     def backward(self):
         """ Find answer """
-        logging.info("grid shape: {}".format(self.grid.shape))
-
         # Max value
-        ix = int(self.grid.tocsr().max(0).argmax())
+        logging.info("Backward stage")
+        ix = int(self.state.tocsr()[0,:].argmax())
         logging.info("Result ix: {}".format(ix))
-
-        order = self.grid.shape[0]
-        self.items["take"] = \
-            backward_path(order, ix, self.grid, self.items, clean=True)
+        logging.info("Path:\n{}".format(self.paths[ix]))
+        for item_id in self.paths[ix]:
+            self.items.loc[item_id, "take"] = 1
+        self.items["take"].fillna(0, inplace=True)
         self.result = self.get_result()
 
     def solve(self):
