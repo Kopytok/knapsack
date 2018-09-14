@@ -57,7 +57,7 @@ def forward_step(item, state, paths):
     compare_col  = lowest_index + weight
     compare_val  = state[0, lowest_index] + value
     compare_col  = max(lower_weight, 0 + weight)
-    compare_path = paths.get(lowest_index, set())
+    compare_path = paths.get(lowest_index, set()) | {item_id}
 
     cur_max = 0
     for col, val in zip(weights, values):
@@ -71,11 +71,11 @@ def forward_step(item, state, paths):
                 if compare_val > cur_max:
                     # --> New item
                     temp_state[0, compare_col] = cur_max = compare_val
-                    temp_paths[compare_col] = compare_path | {item_id}
+                    temp_paths[compare_col] = compare_path
                 # Take next item from queue in any case
                 try:
                     compare_col, compare_val = compare.popleft()
-                    compare_path = paths[compare_col - weight]
+                    compare_path = paths.get(compare_col - weight) | {item_id}
                 except IndexError as e:
                     break
             # If compare_col == col and compare_val > val, insert copmare_val
@@ -83,7 +83,7 @@ def forward_step(item, state, paths):
             if compare_col == col and cur_max < compare_val > val:
                 # --> New item
                 temp_state[0, compare_col] = cur_max = compare_val
-                temp_paths[compare_col] = compare_path | {item_id}
+                temp_paths[compare_col] = compare_path
             elif val > cur_max:
                 cur_max = val
     # Fill rest
@@ -91,10 +91,10 @@ def forward_step(item, state, paths):
         if cur_max < compare_val:
             # --> New item
             temp_state[0, compare_col] = cur_max = compare_val
-            temp_paths[compare_col] = compare_path | {item_id}
+            temp_paths[compare_col] = compare_path
         try:
             compare_col, compare_val = compare.popleft()
-            compare_path = paths[compare_col - weight]
+            compare_path = paths.get(compare_col - weight) | {item_id}
         except IndexError as e:
             break
 
@@ -105,7 +105,7 @@ def forward_step(item, state, paths):
             paths[weight] = temp_paths[weight]
         elif weight in paths:
             # Replace values not in window
-            state[0, 0] = 0
+            state[0, weight] = 0
             paths.pop(weight)
 
 def get_result(items):
@@ -126,8 +126,9 @@ class Knapsack(object):
         prune_exceeded_capacity(self)
 
         # Aux
-        self.state = lil_matrix((1, self.capacity + 1))
         self.paths = dict()
+        self.free_space = self.get_free_space()
+        self.state = lil_matrix((1, self.free_space + 1))
 
     def __repr__(self):
         return "Knapsack. Capacity: {}, items: {}"\
@@ -141,8 +142,8 @@ class Knapsack(object):
 
     def get_free_space(self):
         """ Return free space after taking items """
-        used_space = self.items.loc[self.items["take"], "weight"].sum()
-        return self.capacity - used_space
+        used_space = self.items.loc[self.items["take"] == 1, "weight"].sum()
+        return self.capacity - int(used_space)
 
     def get_result(self):
         """ Return sum of values of taken items """
@@ -158,6 +159,22 @@ class Knapsack(object):
         columns = [param, "take"]
         tmp = self.items.loc[order:]
         return tmp.loc[tmp["take"].isnull(), param].sum()
+
+    def take_item(self, item_id):
+        """ Set take == 1 & reduce paths """
+        self.items.loc[item_id, "take"] = 1
+        self.free_space = self.get_free_space()
+        item = self.items.loc[item_id]
+
+        self.state.data -= item["value"]
+        self.state = lil_matrix(self.state.tocsr()[0, item["weight"]:])
+
+        cols = tuple(self.paths)
+        for col in cols:
+            if item["lower_weight"] <= col <= item["upper_weight"]:
+                pass
+            else:
+                self.paths.pop(col)
 
     def prepare_items_for_dp(self):
         aux_columns = [
@@ -197,6 +214,8 @@ class Knapsack(object):
             self.calculate_boundaries(cur_id)
             item = self.items.loc[cur_id]
             forward_step(item, self.state, self.paths)
+            logging.debug("state:\n{}".format(self.state))
+            logging.debug("paths:\n{}".format(self.paths))
             self.prune()
             self.feasibility_check()
 
