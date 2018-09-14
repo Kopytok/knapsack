@@ -52,7 +52,7 @@ def forward_step(item, state, paths):
     lowest_index = min([w for w in weights
                        if w <= lower_weight - weight] or [0])
 
-    compare, compare_paths = deque(), deque()
+    compare = deque()
     # Initial values
     compare_col  = lowest_index + weight
     compare_val  = state[0, lowest_index] + value
@@ -63,7 +63,6 @@ def forward_step(item, state, paths):
     for col, val in zip(weights, values):
         if lower_weight <= col + weight <= upper_weight:
             compare.append((col + weight, val + value))
-            compare_paths.append(paths.get(col, set()))
         if lower_weight <= col <= upper_weight:
             # Go through all items in compare less than col
             while compare_col < col:
@@ -76,7 +75,7 @@ def forward_step(item, state, paths):
                 # Take next item from queue in any case
                 try:
                     compare_col, compare_val = compare.popleft()
-                    compare_path = compare_paths.popleft()
+                    compare_path = paths[compare_col - weight]
                 except IndexError as e:
                     break
             # If compare_col == col and compare_val > val, insert copmare_val
@@ -95,15 +94,17 @@ def forward_step(item, state, paths):
             temp_paths[compare_col] = compare_path | {item_id}
         try:
             compare_col, compare_val = compare.popleft()
-            compare_path = compare_paths.popleft()
+            compare_path = paths[compare_col - weight]
         except IndexError as e:
             break
+
+    # Apply changes
     for value, weight in zip(temp_state.data[0], temp_state.rows[0]):
-        # Replace values not in window
         if lower_weight <= weight <= upper_weight:
             state[0, weight] = value
             paths[weight] = temp_paths[weight]
         elif weight in paths:
+            # Replace values not in window
             state[0, 0] = 0
             paths.pop(weight)
 
