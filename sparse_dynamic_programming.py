@@ -3,10 +3,9 @@ import logging
 
 from collections import namedtuple, deque
 
-import numpy as np
 import pandas as pd
 
-from scipy.sparse import lil_matrix, hstack
+from scipy.sparse import lil_matrix
 
 from prune import *
 
@@ -34,7 +33,7 @@ def prepare_items(items=None, by=["value", "density",], ascending=False):
             # ascending = [True, False] if dens_first else [False, True]
         items.sort_values(by, ascending=ascending, inplace=True)
         logging.info("Sorted by {}".format(by))
-        items["take"] = np.nan
+        items["take"] = None
         logging.info("First 5 items:\n{}".format(items.head()))
         return items
     return pd.DataFrame(columns=["value", "weight", "density", "take"])
@@ -193,7 +192,7 @@ class Knapsack(object):
             "min_ix",
         ]
         for col in aux_columns:
-            self.items[col] = np.nan
+            self.items[col] = None
 
     def calculate_taken(self, value="value"):
         """ Calculate total of taken items values (value or weight) """
@@ -230,7 +229,7 @@ class Knapsack(object):
 
         prune_freq = min(self.n_items // 10 + 1, 100)
         for order, (cur_id, item) in enumerate(search_items.iterrows()):
-            if ~np.isnan(self.items.loc[cur_id, "take"]):
+            if ~self.items.isnull().loc[cur_id, "take"]:
                 continue
             logging.info("Forward. order: {}".format(order, cur_id))
 
