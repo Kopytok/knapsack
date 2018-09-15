@@ -10,7 +10,7 @@ from scipy.sparse import lil_matrix, hstack
 
 from prune import *
 
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -18,10 +18,14 @@ logging.basicConfig(level=logging.DEBUG,
         logging.StreamHandler(),
     ])
 
-def prepare_items(items=None, by=None, ascending=False):
+def prepare_items(items=None, by=["value", "density",], ascending=False):
     """ Convert list of namedtuples into dataframe and sort it """
     if isinstance(items, pd.DataFrame):
         items["density"] = items.eval("value / weight")
+        # items["tmp_value"] = items["value"] / items["value"].max()
+        # items["tmp_weight"] = items["weight"] / items["weight"].max()
+        # items["sort"] = items.eval("tmp_value * tmp_weight")
+        # items.drop(["tmp_value", "tmp_weight"], axis=1, inplace=True)
         if not by:
             dens_first = (items["density"].std() > 0)
             by = "density" if dens_first else "value"
@@ -203,8 +207,11 @@ class Knapsack(object):
             item["avail_%s" % param] = self.eval_left(param, item_id)
 
         item["max_val"] = self.state.tocsr().max()
-        low_val = max(1, item["max_val"] - item["avail_value"])
-        item["min_ix"] = min((self.state >= low_val).tolil().rows[0] or [0])
+        low_val = max(0, item["max_val"] - item["avail_value"])
+        if low_val:
+            item["min_ix"] = min((self.state >= low_val).tolil().rows[0])
+        else:
+            item["min_ix"] = 0
 
         item["upper_weight"] = self.capacity
         item["lower_weight"] = max(self.filled_space, item["min_ix"],
