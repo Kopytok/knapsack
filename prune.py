@@ -1,14 +1,11 @@
 import logging
-
-import numpy as np
-
-from scipy.sparse import lil_matrix, vstack
+from functools import reduce
 
 def prune(knapsack):
     """ Main pruning function """
-    pruned = prune_items(knapsack)
+    pruned = prune_paths(knapsack)
     if pruned:
-        pruned = prune_domain(knapsack)
+        prune_items(knapsack)
         return True
     return False
 
@@ -17,7 +14,7 @@ def prune(knapsack):
 def prune_items(knapsack):
     """ Find items that must or must not be taken """
     sequence = [
-        prune_exceeded_capacity,
+        prune_exceeded_free_space,
     ]
     pruned = False
     for func in sequence:
@@ -39,9 +36,10 @@ def prune_zero_values(knapsack):
         return True
     return False
 
-def prune_exceeded_capacity(knapsack):
-    """ Don't take items with weight > capacity """
-    ix = (knapsack.items["weight"] > knapsack.capacity) & \
+def prune_exceeded_free_space(knapsack):
+    """ Don't take items with weight > free_space """
+    free_space = knapsack.capacity - knapsack.filled_space
+    ix = (knapsack.items["weight"] > free_space) & \
           knapsack.items["take"].isnull()
     knapsack.items.loc[ix, "take"] = 0
     if ix.sum() > 0:
@@ -52,31 +50,28 @@ def prune_exceeded_capacity(knapsack):
 
 """ Domain pruning part """
 
-def prune_domain(knapsack):
+def prune_paths(knapsack):
     """ Remove rows and columns from domain """
     sequence = [
-        prune_remove_not_taken,
         prune_remove_taken,
+        prune_incomming_not_taken,
     ]
     pruned = False
     for func in sequence:
         pruned = pruned or func(knapsack)
     return pruned
 
-def prune_remove_not_taken(knapsack):
-    """ Remove from domain rows for items with "take" == 0 """
-    prune_incomming_not_taken(knapsack)
-    prune_observed_not_taken(knapsack)
-
 def prune_incomming_not_taken(knapsack):
-    """ Decrease number of rows in domain by number of not taken items """
-    pass
-
-def prune_observed_not_taken(knapsack):
-    """ Remove from domain rows for observed not taken items """
+    """ Do not observe incomming items that do not fit """
     pass
 
 def prune_remove_taken(knapsack):
-    """ Remove from domain rows for items with "take" == 1 and
-        decrease capacity by their weight """
-    pass
+    """ Find items that must be taken. Thus lower paths and state """
+    must_take = reduce(lambda x, y: x & y, knapsack.paths.values())
+    logging.debug("must_take: {}".format(must_take))
+    if len(must_take):
+        for item_id in must_take:
+            logging.info("take obvious: {}".format(item_id))
+            knapsack.take_item(item_id)
+        return True
+    return False

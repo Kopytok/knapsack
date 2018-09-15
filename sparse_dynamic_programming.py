@@ -10,7 +10,7 @@ from scipy.sparse import lil_matrix, hstack
 
 from prune import *
 
-logging.basicConfig(level=logging.INFO,
+logging.basicConfig(level=logging.DEBUG,
     format="%(levelname)s - %(asctime)s - %(msg)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
@@ -18,15 +18,17 @@ logging.basicConfig(level=logging.INFO,
         logging.StreamHandler(),
     ])
 
-def prepare_items(items=None, by=None):
+def prepare_items(items=None, by=None, ascending=False):
     """ Convert list of namedtuples into dataframe and sort it """
     if isinstance(items, pd.DataFrame):
         items["density"] = items.eval("value / weight")
         if not by:
-            by = "density" if items["density"].std() > 0.2 else "value"
+            dens_first = (items["density"].std() > 0)
+            by = "density" if dens_first else "value"
             else_by = "density" if by != "density" else "value"
             by = [by, else_by]
-        items.sort_values(by, ascending=False, inplace=True)
+            # ascending = [True, False] if dens_first else [False, True]
+        items.sort_values(by, ascending=ascending, inplace=True)
         logging.info("Sorted by {}".format(by))
         items["take"] = np.nan
         logging.info("First 5 items:\n{}".format(items.head()))
@@ -123,16 +125,16 @@ class Knapsack(object):
         n_items = items.shape[0] if isinstance(items, pd.DataFrame) else 0
         self.n_items = n_items
         prune_zero_values(self)
-        prune_exceeded_capacity(self)
+        self.reset_filled_space()
+        prune_exceeded_free_space(self)
 
         # Aux
         self.paths = dict()
-        self.free_space = self.get_free_space()
-        self.state = lil_matrix((1, self.free_space + 1))
+        self.state = lil_matrix((1, self.capacity + 1))
 
     def __repr__(self):
-        return "Knapsack. Capacity: {}, items: {}"\
-            .format(self.capacity, self.n_items)
+        return "Knapsack. Capacity: {}/{}, items: {}".format(
+            self.filled_space, self.capacity, self.n_items)
 
     def feasibility_check(self):
         """ Check if total weight of taken items is
@@ -140,10 +142,10 @@ class Knapsack(object):
         assert self.items.loc[self.items["take"] == 1, "weight"].sum() \
             <= self.capacity, "Not feasible answer. Exceeded capacity."
 
-    def get_free_space(self):
+    def reset_filled_space(self):
         """ Return free space after taking items """
         used_space = self.items.loc[self.items["take"] == 1, "weight"].sum()
-        return self.capacity - int(used_space)
+        self.filled_space = int(used_space)
 
     def get_result(self):
         """ Return sum of values of taken items """
@@ -153,34 +155,38 @@ class Knapsack(object):
         """ Return answer as sequence of zeros and ones """
         return self.items.sort_index()["take"].astype(int).tolist()
 
-    def eval_left(self, param="value", order=None):
+    def eval_left(self, param="value", item_id=None):
         """ Return sum of param for untouched items """
-        order = order or 0
+        item_id = item_id or 0
         columns = [param, "take"]
-        tmp = self.items.loc[order:]
+        tmp = self.items.loc[item_id:]
         return tmp.loc[tmp["take"].isnull(), param].sum()
 
     def take_item(self, item_id):
         """ Set take == 1 & reduce paths """
         self.items.loc[item_id, "take"] = 1
-        self.free_space = self.get_free_space()
-        item = self.items.loc[item_id]
+        self.reset_filled_space()
+        self.calculate_boundaries(item_id)
+        item = self.items.loc[item_id, :]
+        logging.info("Item in take_item:\n{}".format(item))
 
-        self.state.data -= item["value"]
-        self.state = lil_matrix(self.state.tocsr()[0, item["weight"]:])
-
-        cols = tuple(self.paths)
-        for col in cols:
+        weight = int(item["weight"])
+        for col in tuple(self.paths):
             if item["lower_weight"] <= col <= item["upper_weight"]:
-                pass
+                continue
             else:
+                logging.debug("Remove col: {}".format(col))
+                self.state[0, col] = 0
                 self.paths.pop(col)
 
     def prepare_items_for_dp(self):
         aux_columns = [
-            "avail_value",
+            "avail_weight",
             "upper_weight",
             "lower_weight",
+            "avail_value",
+            "max_val",
+            "min_ix",
         ]
         for col in aux_columns:
             self.items[col] = np.nan
@@ -189,13 +195,22 @@ class Knapsack(object):
         """ Calculate total of taken items values (value or weight) """
         return self.items.loc[self.items["take"] == 1, value].sum()
 
-    def calculate_boundaries(self, ix):
+    def calculate_boundaries(self, item_id):
         """ Calculate useful values for taken item """
-        all_taken = self.items.loc[:ix, "weight"].sum()
-        self.items.loc[ix, "upper_weight"] = min(all_taken, self.capacity)
-        self.items.loc[ix, "avail_value"] = self.eval_left("value", ix)
-        self.items.loc[ix, "lower_weight"] = max(0, self.capacity -
-            self.eval_left("weight", ix) - self.items.loc[ix, "weight"])
+        item = self.items.loc[item_id, :].copy()
+        # all_taken = self.items.loc[:item_id, "weight"].sum() FAIL
+        for param in "weight", "value":
+            item["avail_%s" % param] = self.eval_left(param, item_id)
+
+        item["max_val"] = self.state.tocsr().max()
+        low_val = max(1, item["max_val"] - item["avail_value"])
+        item["min_ix"] = min((self.state >= low_val).tolil().rows[0] or [0])
+
+        item["upper_weight"] = self.capacity
+        item["lower_weight"] = max(self.filled_space, item["min_ix"],
+            self.capacity - self.eval_left("weight", item_id))
+
+        self.items.loc[item_id, :] = item
 
     def prune(self):
         """ Prune as method """
@@ -206,6 +221,7 @@ class Knapsack(object):
         self.prepare_items_for_dp()
         search_items = self.items.loc[self.items["take"].isnull()]
 
+        prune_freq = min(self.n_items // 10 + 1, 100)
         for order, (cur_id, item) in enumerate(search_items.iterrows()):
             if ~np.isnan(self.items.loc[cur_id, "take"]):
                 continue
@@ -214,9 +230,10 @@ class Knapsack(object):
             self.calculate_boundaries(cur_id)
             item = self.items.loc[cur_id]
             forward_step(item, self.state, self.paths)
-            logging.debug("state:\n{}".format(self.state))
-            logging.debug("paths:\n{}".format(self.paths))
-            self.prune()
+            if order % prune_freq == 0 and \
+                    0 < item["lower_weight"] < self.capacity - \
+                    self.items.loc[cur_id, "weight"]:
+                self.prune()
             self.feasibility_check()
 
     def backward(self):
