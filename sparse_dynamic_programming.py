@@ -321,7 +321,6 @@ def select_file_in(folder, rows=8):
 def main():
     """ Solve one of tasks """
     import os.path as op
-    import time
 
     path = op.join("data", select_file_in("data"))
     # path = "data/ks_4_0"
