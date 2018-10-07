@@ -299,6 +299,7 @@ def select_file_in(folder, rows=8):
     import os
 
     files = [file for file in os.listdir(folder) if "ks" in file]
+    files = sorted(files, key=lambda x: int(x.split("_")[1]))
     page  = 0
     while True:
         for i, name in zip(range(rows), files[page * rows:(page + 1) * rows]):
