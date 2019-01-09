@@ -10,7 +10,7 @@
 
 ### Goal:
 
-Find the greatest total value such that total weight does not exceed capacity of the knapsack:
+Find the greatest total value such that total weight does not exceed capacity of the knapsack.
 
 Maximize:
 
