@@ -21,10 +21,6 @@ def prepare_items(items=None, by=["value", "density",], ascending=False):
     """ Convert list of namedtuples into dataframe and sort it """
     if isinstance(items, pd.DataFrame):
         items["density"] = items.eval("value / weight")
-        # items["tmp_value"] = items["value"] / items["value"].max()
-        # items["tmp_weight"] = items["weight"] / items["weight"].max()
-        # items["sort"] = items.eval("tmp_value * tmp_weight")
-        # items.drop(["tmp_value", "tmp_weight"], axis=1, inplace=True)
         if not by:
             dens_first = (items["density"].std() > 0)
             by = "density" if dens_first else "value"
