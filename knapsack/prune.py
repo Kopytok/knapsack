@@ -1,5 +1,4 @@
-import logging
-from functools import reduce
+from .imports import *
 
 def prune(knapsack):
     """ Main pruning function """

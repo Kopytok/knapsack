@@ -1,38 +1,6 @@
-import time
-import logging
-
-from collections import namedtuple, deque
-
-import pandas as pd
-
-from scipy.sparse import lil_matrix
-
-from prune import *
-
-logging.basicConfig(level=logging.INFO,
-    format="%(levelname)s - %(asctime)s - %(msg)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler("log_knapsack.log"), # For debug
-        logging.StreamHandler(),
-    ])
-
-def prepare_items(items=None, by=["value", "density",], ascending=False):
-    """ Convert list of namedtuples into dataframe and sort it """
-    if isinstance(items, pd.DataFrame):
-        items["density"] = items.eval("value / weight")
-        if not by:
-            dens_first = (items["density"].std() > 0)
-            by = "density" if dens_first else "value"
-            else_by = "density" if by != "density" else "value"
-            by = [by, else_by]
-            # ascending = [True, False] if dens_first else [False, True]
-        items.sort_values(by, ascending=ascending, inplace=True)
-        logging.info("Sorted by {}".format(by))
-        items["take"] = None
-        logging.info("First 5 items:\n{}".format(items.head()))
-        return items
-    return pd.DataFrame(columns=["value", "weight", "density", "take"])
+from .imports import *
+from .prune import *
+from .open_data import *
 
 def forward_step(item, state, paths):
     """ Make DP forward step """
@@ -49,53 +17,58 @@ def forward_step(item, state, paths):
     temp_state = lil_matrix(state, copy=True)
     temp_paths = paths.copy()
 
+    # 2 domains
     values, weights = state.data[0], state.rows[0]
+
+    # Initial index (= weight)
     lowest_index = min([w for w in weights
                        if w <= lower_weight - weight] or [0])
 
-    compare = deque()
+    cmpr_q = deque()
     # Initial values
-    compare_col  = lowest_index + weight
-    compare_val  = state[0, lowest_index] + value
-    compare_col  = max(lower_weight, 0 + weight)
-    compare_path = paths.get(lowest_index, set()) | {item_id}
+    cmpr_v = state[0, lowest_index] + value
+    cmpr_w = max(lower_weight, 0 + weight)
+    cmpr_path = paths.get(lowest_index, set()) | {item_id}
 
     cur_max = 0
-    for col, val in zip(weights, values):
-        if lower_weight <= col + weight <= upper_weight:
-            compare.append((col + weight, val + value))
-        if lower_weight <= col <= upper_weight:
-            # Go through all items in compare less than col
-            while compare_col < col:
-                # If compare_val > cur_max insert item, update cur_max
+    for w, v in zip(weights, values):
+        # Accumulate possible substitutes
+        if lower_weight <= w + weight <= upper_weight:
+            cmpr_q.append((w + weight, v + value))
+
+
+        if lower_weight <= w <= upper_weight:
+            # Go through all items in cmpr_q less than w
+            while cmpr_w < w:
+                # If cmpr_v > cur_max insert item, update cur_max
                 # skip it in other case
-                if compare_val > cur_max:
+                if cmpr_v > cur_max:
                     # --> New item
-                    temp_state[0, compare_col] = cur_max = compare_val
-                    temp_paths[compare_col] = compare_path
+                    temp_state[0, cmpr_w] = cur_max = cmpr_v
+                    temp_paths[cmpr_w] = cmpr_path
                 # Take next item from queue in any case
                 try:
-                    compare_col, compare_val = compare.popleft()
-                    compare_path = paths.get(compare_col - weight) | {item_id}
+                    cmpr_w, cmpr_v = cmpr_q.popleft()
+                    cmpr_path = paths.get(cmpr_w - weight) | {item_id}
                 except IndexError as e:
                     break
-            # If compare_col == col and compare_val > val, insert copmare_val
+            # If cmpr_w == w and cmpr_v > v, insert cmpr_v
             # and update cur_max
-            if compare_col == col and cur_max < compare_val > val:
+            if cmpr_w == w and cur_max < cmpr_v > v:
                 # --> New item
-                temp_state[0, compare_col] = cur_max = compare_val
-                temp_paths[compare_col] = compare_path
-            elif val > cur_max:
-                cur_max = val
+                temp_state[0, cmpr_w] = cur_max = cmpr_v
+                temp_paths[cmpr_w] = cmpr_path
+            elif v > cur_max:
+                cur_max = v
     # Fill rest
     while True:
-        if cur_max < compare_val:
+        if cur_max < cmpr_v:
             # --> New item
-            temp_state[0, compare_col] = cur_max = compare_val
-            temp_paths[compare_col] = compare_path
+            temp_state[0, cmpr_w] = cur_max = cmpr_v
+            temp_paths[cmpr_w] = cmpr_path
         try:
-            compare_col, compare_val = compare.popleft()
-            compare_path = paths.get(compare_col - weight) | {item_id}
+            cmpr_w, cmpr_v = cmpr_q.popleft()
+            cmpr_path = paths.get(cmpr_w - weight) | {item_id}
         except IndexError as e:
             break
 
@@ -170,15 +143,15 @@ class Knapsack(object):
         logging.info("Item in take_item:\n{}".format(item))
 
         weight = int(item["weight"])
-        for col in tuple(self.paths):
-            if item["lower_weight"] <= col <= item["upper_weight"]:
+        for w in tuple(self.paths):
+            if item["lower_weight"] <= w <= item["upper_weight"]:
                 continue
             else:
-                logging.debug("Remove col: {}".format(col))
-                self.state[0, col] = 0
-                self.paths.pop(col)
+                logging.debug("Remove w: {}".format(w))
+                self.state[0, w] = 0
+                self.paths.pop(w)
 
-    def prepare_items_for_dp(self):
+    def reset_dp(self):
         aux_columns = [
             "avail_weight",
             "upper_weight",
@@ -187,8 +160,8 @@ class Knapsack(object):
             "max_val",
             "min_ix",
         ]
-        for col in aux_columns:
-            self.items[col] = None
+        for w in aux_columns:
+            self.items[w] = None
 
     def calculate_taken(self, value="value"):
         """ Calculate total of taken items values (value or weight) """
@@ -220,7 +193,7 @@ class Knapsack(object):
 
     def forward(self):
         """ Fill domain """
-        self.prepare_items_for_dp()
+        self.reset_dp()
         search_items = self.items.loc[self.items["take"].isnull()]
 
         prune_freq = min(self.n_items // 10 + 1, 100)
@@ -289,42 +262,5 @@ class Knapsack(object):
         knapsack = cls(capacity, items)
         return knapsack
 
-
-def select_file_in(folder, rows=8):
-    """ Select menu for input directory """
-    import os
-
-    files = [file for file in os.listdir(folder) if "ks" in file]
-    page  = 0
-    while True:
-        for i, name in zip(range(rows), files[page * rows:(page + 1) * rows]):
-            print(i, name)
-        try:
-            choice = int(input(
-                "Select file. (8 for prev page, 9 for next page)\n"))
-        except ValueError as e:
-            continue
-        if choice == 9 and len(files):
-            page += 1
-        elif choice == 8 and page > 0:
-            page -= 1
-        elif choice in list(range(rows)):
-            try:
-                return files[page * 8 + choice]
-            except IndexError as e:
-                continue
-
-def main():
-    """ Solve one of tasks """
-    import os.path as op
-    import time
-
-    path = op.join("data", select_file_in("data"))
-    # path = "data/ks_4_0"
-
-    knapsack = Knapsack().load(path)
-    answer = knapsack.solve()
-    return answer
-
 if __name__=="__main__":
-    main()
+    pass
