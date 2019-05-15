@@ -1,6 +1,15 @@
 import pandas as pd
 
-from sparse_dynamic_programming import Knapsack
+from knapsack.imports import *
+from knapsack.knapsack import Knapsack
+
+logging.basicConfig(level=logging.INFO,
+    format="%(levelname)s - %(asctime)s - %(msg)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.FileHandler("log_knapsack.log"), # For debug
+        logging.StreamHandler(),
+    ])
 
 def main():
     """ Usage example """
