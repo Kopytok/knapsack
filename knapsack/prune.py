@@ -66,7 +66,7 @@ def prune_incomming_not_taken(knapsack):
 
 def prune_remove_taken(knapsack):
     """ Find items that must be taken. Thus lower paths and state """
-    must_take = reduce(lambda x, y: x & y, knapsack.paths.values())
+    must_take = reduce(lambda x, y: x & y, knapsack.dp.paths.values())
     logging.debug("must_take: {}".format(must_take))
     if len(must_take):
         for item_id in must_take:
