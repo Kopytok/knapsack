@@ -1,6 +1,7 @@
 import pandas as pd
 
 from knapsack.imports import *
+from knapsack.open_data import select_file_in
 from knapsack.knapsack import Knapsack
 
 logging.basicConfig(level=logging.INFO,
@@ -13,10 +14,12 @@ logging.basicConfig(level=logging.INFO,
 
 def main():
     """ Usage example """
-    items = pd.read_csv("200_items.csv")
-    capacity = 2640230
+    # items = pd.read_csv("200_items.csv")
+    # capacity = 2640230
 
-    knapsack = Knapsack(capacity, items)
+    # knapsack = Knapsack(capacity, items)
+    path = select_file_in("data")
+    knapsack = Knapsack.load(f"data/{path}")
     answer = knapsack.solve()
     print("Total value of selected items: {}".format(knapsack.result))
 
