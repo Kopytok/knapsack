@@ -3,10 +3,6 @@ from .prune import *
 from .open_data import *
 from .dynamic_programming import *
 
-def get_result(items):
-    """ Return sum of values of taken items """
-    return items.loc[items["take"] == 1, "value"].astype(int).sum()
-
 
 class Knapsack(object):
     def __init__(self, capacity=0, items=None):
@@ -38,9 +34,10 @@ class Knapsack(object):
         used_space = self.items.loc[self.items["take"] == 1, "weight"].sum()
         self.filled_space = int(used_space)
 
-    def get_result(self):
+    def get_result(self, items=None):
         """ Return sum of values of taken items """
-        return get_result(self.items)
+        items = items or self.items
+        return items.loc[items["take"] == 1, "value"].astype(int).sum()
 
     def get_answer(self):
         """ Return answer as sequence of zeros and ones """
