@@ -24,8 +24,8 @@ class Knapsack(object):
         prune_exceeded_free_space(self)
 
     def __repr__(self):
-        return "Knapsack. Capacity: {}/{}, items: {}".format(
-            self.filled_space, self.capacity, self.n_items)
+        return f"Knapsack. Capacity: {self.filled_space}/{self.capacity}, " +\
+            f"items: {self.n_items}"
 
     def feasibility_check(self):
         """ Check if total weight of taken items is
@@ -59,13 +59,13 @@ class Knapsack(object):
         self.reset_filled_space()
         self.calculate_boundaries(item_id)
         item = self.items.loc[item_id, :]
-        logging.info("Item in take_item:\n{}".format(item))
+        logging.info(f"Item in take_item:\n{item}")
 
         for w in tuple(self.dp.paths):
             if item["lower_weight"] <= w <= self.capacity:
                 continue
             else:
-                logging.debug("Remove w: {}".format(w))
+                logging.debug(f"Remove w: {w}")
                 self.dp.state[0, w] = 0
                 self.dp.paths.pop(w)
 
@@ -91,14 +91,16 @@ class Knapsack(object):
             item["avail_%s" % param] = self.eval_left(param, item_id)
 
         item["max_val"] = self.dp.state.tocsr().max()
-        low_val = max(0, item["max_val"] - item["avail_value"])
-        if low_val:
-            item["min_ix"] = min((self.dp.state >= low_val).tolil().rows[0])
-        else:
-            item["min_ix"] = 0
 
-        item["lower_weight"] = max(self.filled_space, item["min_ix"],
-            self.capacity - self.eval_left("weight", item_id))
+        low_val = max(0, item["max_val"] - item["avail_value"])
+        item["min_ix"] = min((self.dp.state >= low_val).tolil().rows[0]) \
+            if low_val else 0
+
+        item["lower_weight"] = max(
+            self.filled_space,
+            item["min_ix"],
+            self.capacity - self.eval_left("weight", item_id)
+        )
 
         self.items.loc[item_id, :] = item
 
@@ -131,11 +133,10 @@ class Knapsack(object):
 
     def backward(self):
         """ Find answer """
-        # Max value
-        logging.info("Backward stage")
         ix = int(self.dp.state.tocsr()[0,:].argmax())
-        logging.info("Result ix: {}".format(ix))
-        logging.info("Path:\n{}".format(self.dp.paths[ix]))
+        logging.info(f"Result ix: {ix}")
+        logging.info(f"Path:\n{self.dp.paths[ix]}")
+
         for item_id in self.dp.paths[ix]:
             self.items.loc[item_id, "take"] = 1
         self.items["take"].fillna(0, inplace=True)
@@ -149,14 +150,13 @@ class Knapsack(object):
         logging.info("Finished forward")
 
         self.backward()
-        logging.info("Finished backward. Total time (sec): {}"
-            .format(time.time() - t0))
+        logging.info("Finished backward. Total time (sec): "
+                     f"{time.time() - t0}")
 
         self.feasibility_check()
         answer = self.get_answer()
-        logging.info("Resulting value: {}".format(self.result))
-        logging.info("Selected items: {}"
-            .format(answer))
+        logging.info(f"Resulting value: {self.result}")
+        logging.info(f"Selected items: {answer}")
         return answer
 
     @classmethod
@@ -166,8 +166,7 @@ class Knapsack(object):
             items = f.readlines()
 
         n_items, capacity = map(int, items[0].split())
-        logging.info("New data: {} items, {} capacity"
-            .format(n_items, capacity))
+        logging.info(f"New data: {n_items} items, {capacity} capacity")
 
         Item = namedtuple("Item", ["value", "weight", "density"])
         items_list = list()
@@ -180,5 +179,5 @@ class Knapsack(object):
         knapsack = cls(capacity, items)
         return knapsack
 
-if __name__=="__main__":
+if __name__ == "__main__":
     pass
