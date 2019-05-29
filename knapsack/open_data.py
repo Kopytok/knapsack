@@ -40,3 +40,24 @@ def select_file_in(folder, rows=8):
                 return files[page * 8 + choice]
             except IndexError as e:
                 continue
+
+def read_knapsack(path):
+    """ Read capacity & items from file """
+    with open(path, "r") as f:
+        items = f.readlines()
+
+    n_items, capacity = map(int, items[0].split())
+    logging.info(f"New data: {n_items} items, {capacity} capacity")
+
+    Item = namedtuple("Item", ["value", "weight", "density"])
+    items_list = list()
+    for item in items[1:]:
+        if item.strip():
+            value, weight = map(int, item.split())
+            row = Item(value, weight, value / weight)
+            items_list.append(row)
+    items = pd.DataFrame(items_list)
+    return capacity, items
+
+if __name__ == "__main__":
+    pass

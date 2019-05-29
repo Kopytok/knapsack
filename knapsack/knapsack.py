@@ -159,22 +159,10 @@ class Knapsack(object):
     @classmethod
     def load(cls, path):
         """ Load knapsack from file """
-        with open(path, "r") as f:
-            items = f.readlines()
-
-        n_items, capacity = map(int, items[0].split())
-        logging.info(f"New data: {n_items} items, {capacity} capacity")
-
-        Item = namedtuple("Item", ["value", "weight", "density"])
-        items_list = list()
-        for item in items[1:]:
-            if item.strip():
-                value, weight = map(int, item.split())
-                row = Item(value, weight, value / weight)
-                items_list.append(row)
-        items = pd.DataFrame(items_list)
+        capacity, items = read_knapsack(path)
         knapsack = cls(capacity, items)
         return knapsack
+
 
 if __name__ == "__main__":
     pass
